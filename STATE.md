@@ -40,13 +40,40 @@ GET /context/relations?id=g-ver-leftpad-130 -> 200 (131.8ms)
 ```
 
 ## P1 — Schema
-- [ ] Read HydraDB docs: data model, write path, traversal API, cost/latency
-- [ ] SCHEMA.md: Package/Version/Maintainer/Advisory/Lockfile/Service nodes;
+- [x] Read HydraDB docs: data model, write path, traversal API, cost/latency
+- [x] SCHEMA.md: Package/Version/Maintainer/Advisory/Lockfile/Service nodes;
       DEPENDS_ON / PUBLISHED_BY / AFFECTED_BY / RESOLVED_TO / SIMILAR_NAME edges
-- [ ] Time first-class: validity intervals on RESOLVED_TO + AFFECTED_BY
-- [ ] Justify each choice against "why a vector index cannot answer this"
+- [x] Time first-class: validity intervals on RESOLVED_TO + AFFECTED_BY
+- [x] Justify each choice against "why a vector index cannot answer this"
 
-**GATE:** SCHEMA.md written; 20-node fixture loads; 3-hop reverse traversal correct.
+**GATE: PASSED.** [SCHEMA.md](SCHEMA.md) written (7 node kinds, 7 edge types, interval
+semantics, per-question vector-index argument). 20-node fixture at
+`ingest/fixtures/mini.json` loads; 3-hop reverse traversal correct.
+
+```
+$ uv run pytest -q
+..............                                                           [100%]
+14 passed in 0.01s
+
+$ uv run ruff check . --output-format=concise
+All checks passed!
+$ uv run ruff format --check .
+4 files already formatted
+$ uv run mypy src tests
+Success: no issues found in 3 source files
+```
+
+The gate case — `reverse_dependents("ver:left-pad@1.3.0")`:
+
+```
+ver:mid-lib@2.0.0   depth 1   via mid-lib@2.0.0  --DEPENDS_ON(^1.3.0 -> 1.3.0)--> pkg:left-pad
+ver:top-app@3.1.0   depth 2   via top-app@3.1.0  --DEPENDS_ON(^2.0.0 -> 2.0.0)--> pkg:mid-lib
+ver:demo-app@1.0.0  depth 3   via demo-app@1.0.0 --DEPENDS_ON(~3.1.0 -> 3.1.0)--> pkg:top-app
+```
+
+`top-app@3.1.0` also dev-depends on `pkg:left-pad` but resolves to `1.2.0`, and is correctly
+excluded from the `1.3.0` closure at depth 1 — the discriminating case a similarity index gets
+wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
 
 ## P2 — Ingest at ecosystem scale
 - [ ] npm replication: packages + versions + maintainers (resumable, checkpointed)
@@ -113,10 +140,31 @@ GET /context/relations?id=g-ver-leftpad-130 -> 200 (131.8ms)
   (B1) and there is no traversal call, so P1/P3 as specified cannot be built on it alone.
   Architecture fork raised with the user; defaulting to the hybrid design next iteration if no
   answer. P1 doc work that doesn't depend on the fork can proceed regardless.
+- **Aug 14, iter 1** — Architecture fork answered: **hybrid**, coverage capped at **top ~25k npm
+  packages by downloads + the full OSV/GHSA advisory set**. B1 closed as a decision. P1 complete
+  and gate passed in the same iteration. Writing the traversal first paid off immediately: the
+  `resolved`-version discriminator (top-app dev-depends on left-pad@1.2.0, not 1.3.0) is exactly
+  the case that separates a real closure from a plausible one, and it now has a regression test.
+  Half-open interval semantics chosen so a boundary touch is not an overlap.
 
 ## Blockers
 
-### B1 — HydraDB has no typed-edge store and no traversal API (STRUCTURAL, blocks P1 as written)
+### B1 — RESOLVED by architecture decision (Aug 14, iter 1)
+
+**Decision: hybrid.** The deterministic dependency/temporal graph lives in an embedded local
+store built from real npm + OSV data and answers Q1–Q6 exactly. HydraDB holds the same corpus as
+system of record and carries the semantic layer it is actually built for: advisory
+understanding, maintainer and typosquat similarity, and the extracted provenance paths the
+console renders as proof. README and DEMO_SCRIPT must state plainly which answers only HydraDB
+produces, so its role is not overstated *or* undersold. Finding preserved below as the
+justification.
+
+**Coverage decision:** top ~25,000 npm packages by download count + the complete OSV/GHSA
+advisory set for npm. Cap stated in README and EVAL.md; no silent truncation anywhere.
+
+---
+
+#### Original finding — HydraDB has no typed-edge store and no traversal API
 
 P1 specifies typed edges with properties (`DEPENDS_ON` with semver range + resolved version,
 `AFFECTED_BY` with version bounds, `RESOLVED_TO` with validity intervals) and P3 specifies

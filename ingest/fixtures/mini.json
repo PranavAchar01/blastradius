@@ -1,0 +1,59 @@
+{
+  "_comment": "P1 gate fixture: 20 nodes exercising every node kind and edge type, a 3-hop reverse-dependency chain, interval edges that open and close inside the exposure window, and a typosquat pair. Exposure window for the scenario is 2026-03-10T09:00Z .. 09:06Z.",
+  "nodes": [
+    { "id": "pkg:left-pad",  "kind": "Package", "props": { "name": "left-pad",  "ecosystem": "npm", "download_rank": 412, "description": "Pad a string on the left." } },
+    { "id": "pkg:mid-lib",   "kind": "Package", "props": { "name": "mid-lib",   "ecosystem": "npm", "download_rank": 8801, "description": "Intermediate helper library." } },
+    { "id": "pkg:top-app",   "kind": "Package", "props": { "name": "top-app",   "ecosystem": "npm", "download_rank": 15022, "description": "Application framework." } },
+    { "id": "pkg:demo-app",  "kind": "Package", "props": { "name": "demo-app",  "ecosystem": "npm", "download_rank": 90114, "description": "Demo consumer application." } },
+    { "id": "pkg:lodash",    "kind": "Package", "props": { "name": "lodash",    "ecosystem": "npm", "download_rank": 3, "description": "Modern JavaScript utility library." } },
+    { "id": "pkg:1odash",    "kind": "Package", "props": { "name": "1odash",    "ecosystem": "npm", "download_rank": 998001, "description": "Modern JavaScript utility library." } },
+
+    { "id": "ver:left-pad@1.2.0", "kind": "Version", "props": { "version": "1.2.0", "published_at": "2017-06-01T00:00:00Z", "deprecated": false } },
+    { "id": "ver:left-pad@1.3.0", "kind": "Version", "props": { "version": "1.3.0", "published_at": "2018-04-05T00:00:00Z", "deprecated": false } },
+    { "id": "ver:mid-lib@2.0.0",  "kind": "Version", "props": { "version": "2.0.0", "published_at": "2025-11-02T00:00:00Z", "deprecated": false } },
+    { "id": "ver:top-app@3.1.0",  "kind": "Version", "props": { "version": "3.1.0", "published_at": "2026-01-15T00:00:00Z", "deprecated": false } },
+    { "id": "ver:demo-app@1.0.0", "kind": "Version", "props": { "version": "1.0.0", "published_at": "2026-02-20T00:00:00Z", "deprecated": false } },
+    { "id": "ver:lodash@4.17.21", "kind": "Version", "props": { "version": "4.17.21", "published_at": "2021-02-20T00:00:00Z", "deprecated": false } },
+    { "id": "ver:1odash@4.17.21", "kind": "Version", "props": { "version": "4.17.21", "published_at": "2026-03-09T23:10:00Z", "deprecated": false } },
+
+    { "id": "mnt:stevemao",   "kind": "Maintainer", "props": { "handle": "stevemao",   "package_count": 2 } },
+    { "id": "mnt:evil-actor", "kind": "Maintainer", "props": { "handle": "evil-actor", "package_count": 1 } },
+
+    { "id": "adv:GHSA-fixture-leftpad", "kind": "Advisory", "props": { "osv_id": "GHSA-fixture-leftpad", "severity": "critical", "cvss": 9.8, "published_at": "2026-03-10T09:00:00Z", "summary": "Malicious code in left-pad 1.3.0 exfiltrates environment variables on require()." } },
+    { "id": "adv:GHSA-fixture-typosquat", "kind": "Advisory", "props": { "osv_id": "GHSA-fixture-typosquat", "severity": "high", "cvss": 8.1, "published_at": "2026-03-10T04:00:00Z", "summary": "1odash is a typosquat of lodash containing a postinstall credential stealer." } },
+
+    { "id": "lock:acme-checkout-sha", "kind": "Lockfile", "props": { "lockfile_version": 3, "entry_count": 412 } },
+    { "id": "svc:acme/checkout", "kind": "Service", "props": { "name": "checkout", "owner": "acme", "environment": "production" } },
+    { "id": "svc:acme/billing",  "kind": "Service", "props": { "name": "billing",  "owner": "acme", "environment": "production" } }
+  ],
+  "edges": [
+    { "type": "VERSION_OF", "src": "ver:left-pad@1.2.0", "dst": "pkg:left-pad", "props": {} },
+    { "type": "VERSION_OF", "src": "ver:left-pad@1.3.0", "dst": "pkg:left-pad", "props": {} },
+    { "type": "VERSION_OF", "src": "ver:mid-lib@2.0.0",  "dst": "pkg:mid-lib",  "props": {} },
+    { "type": "VERSION_OF", "src": "ver:top-app@3.1.0",  "dst": "pkg:top-app",  "props": {} },
+    { "type": "VERSION_OF", "src": "ver:demo-app@1.0.0", "dst": "pkg:demo-app", "props": {} },
+    { "type": "VERSION_OF", "src": "ver:lodash@4.17.21", "dst": "pkg:lodash",   "props": {} },
+    { "type": "VERSION_OF", "src": "ver:1odash@4.17.21", "dst": "pkg:1odash",   "props": {} },
+
+    { "type": "DEPENDS_ON", "src": "ver:mid-lib@2.0.0",  "dst": "pkg:left-pad", "props": { "range": "^1.3.0", "resolved": "1.3.0", "dep_type": "prod" } },
+    { "type": "DEPENDS_ON", "src": "ver:top-app@3.1.0",  "dst": "pkg:mid-lib",  "props": { "range": "^2.0.0", "resolved": "2.0.0", "dep_type": "prod" } },
+    { "type": "DEPENDS_ON", "src": "ver:demo-app@1.0.0", "dst": "pkg:top-app",  "props": { "range": "~3.1.0", "resolved": "3.1.0", "dep_type": "prod" } },
+    { "type": "DEPENDS_ON", "src": "ver:demo-app@1.0.0", "dst": "pkg:lodash",   "props": { "range": "^4.17.0", "resolved": "4.17.21", "dep_type": "prod" } },
+    { "type": "DEPENDS_ON", "src": "ver:top-app@3.1.0",  "dst": "pkg:left-pad", "props": { "range": "^1.2.0", "resolved": "1.2.0", "dep_type": "dev" } },
+
+    { "type": "PUBLISHED_BY", "src": "pkg:left-pad", "dst": "mnt:stevemao",   "props": { "since": "2014-01-01T00:00:00Z" } },
+    { "type": "PUBLISHED_BY", "src": "pkg:mid-lib",  "dst": "mnt:stevemao",   "props": { "since": "2025-01-01T00:00:00Z" } },
+    { "type": "PUBLISHED_BY", "src": "pkg:1odash",   "dst": "mnt:evil-actor", "props": { "since": "2026-03-09T00:00:00Z" } },
+
+    { "type": "AFFECTED_BY", "src": "pkg:left-pad", "dst": "adv:GHSA-fixture-leftpad", "props": { "introduced": "1.3.0", "fixed": "1.3.1", "valid_from": "2018-04-05T00:00:00Z", "valid_to": null } },
+    { "type": "AFFECTED_BY", "src": "pkg:1odash",   "dst": "adv:GHSA-fixture-typosquat", "props": { "introduced": "0.0.0", "fixed": null, "valid_from": "2026-03-09T23:10:00Z", "valid_to": null } },
+
+    { "type": "SIMILAR_NAME", "src": "pkg:1odash", "dst": "pkg:lodash", "props": { "distance": 1, "rank_gap": 997998 } },
+
+    { "type": "DECLARES", "src": "svc:acme/checkout", "dst": "lock:acme-checkout-sha", "props": { "observed_at": "2026-03-10T08:00:00Z" } },
+
+    { "type": "RESOLVED_TO", "src": "lock:acme-checkout-sha", "dst": "ver:left-pad@1.3.0", "props": { "resolved_at": "2026-03-10T09:01:00Z", "valid_from": "2026-03-10T09:01:00Z", "valid_to": "2026-03-10T09:05:00Z" } },
+    { "type": "RESOLVED_TO", "src": "lock:acme-checkout-sha", "dst": "ver:left-pad@1.2.0", "props": { "resolved_at": "2026-03-10T09:05:00Z", "valid_from": "2026-03-10T09:05:00Z", "valid_to": null } },
+    { "type": "RESOLVED_TO", "src": "lock:acme-checkout-sha", "dst": "ver:demo-app@1.0.0", "props": { "resolved_at": "2026-03-01T00:00:00Z", "valid_from": "2026-03-01T00:00:00Z", "valid_to": null } }
+  ]
+}
