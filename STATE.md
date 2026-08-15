@@ -243,6 +243,18 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   returned "nobody is affected". The earlier `call-bound@1.0.4` test passed only because
   1.0.4 happened to be latest. Fixed by resolving against all known versions via
   max-satisfying; `blast_radius(acorn@7.4.1)` went 0 → 3 dependents.
+- **Aug 15, iter 7** — HydraDB semantic layer built and proven load-bearing. Advisory prose
+  (usable GHSA only — not held out, not withdrawn, no `MAL-*` stubs) is ingested through the
+  `documents` path. Measured: 25 docs per request in 2.0s, fully indexed including graph
+  creation in 45s. HydraDB rate-limits ingest with 429, so batches now honour `Retry-After`
+  with exponential fallback and pace at 1.5s.
+  The payoff query — *"malicious postinstall script that steals environment variables and
+  credentials"*, which names no package at all — returns as its top hit
+  `GHSA-f29h-pxvx-f335`, the real July 2025 **eslint-config-prettier** supply-chain
+  compromise (score 0.91), then four more credential-leak advisories. 594ms server-side in
+  `fast` mode. No SQL predicate over the same corpus finds that; this is the half of the
+  problem the graph genuinely cannot do, and it is why the split in SCHEMA.md §0 is real
+  rather than decorative.
 
 ## Blockers
 

@@ -28,6 +28,7 @@ from blastradius_ingest.build import (
     resolve_all_versions,
     resolve_latest_versions,
 )
+from blastradius_ingest.hydra import HydraClient, ingest_advisories
 from blastradius_ingest.osv import HOLDOUT_CUTOFF, download_osv, load_advisories
 from blastradius_ingest.registry import Paths, RegistryClient, iter_names, read_ndjson
 from blastradius_ingest.similar import build_similar_names
@@ -187,6 +188,47 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hydra_ingest(args: argparse.Namespace) -> int:
+    """Push advisory prose into HydraDB — the semantic half (SCHEMA.md §0)."""
+    paths = _paths(args)
+    client = HydraClient()
+    t0 = time.monotonic()
+    with Store(args.db) as store:
+        stats = ingest_advisories(
+            store,
+            client,
+            limit=args.limit,
+            state_file=paths.root / "hydra_pushed.txt",
+        )
+    dt = time.monotonic() - t0
+    print(f"[hydra] {stats} in {dt:.0f}s")
+    return 0
+
+
+def cmd_hydra_query(args: argparse.Namespace) -> int:
+    """Ask HydraDB a natural-language question over the advisory corpus."""
+    client = HydraClient()
+    res = client.query(args.text, mode=args.mode, max_results=args.max_results)
+    print(
+        f"[hydra] {len(res['chunks'])} chunks in {res['latency_ms']:.0f}ms "
+        f"(server {res['server_latency_ms']}ms, mode={args.mode})"
+    )
+    for ch in res["chunks"][:5]:
+        body = (ch.get("chunk_content") or "").replace("\n", " ")[:150]
+        print(f"  - {ch.get('id')}  score={ch.get('relevancy_score')}")
+        print(f"      {body}")
+    paths = (res["graph_context"] or {}).get("query_paths") or []
+    if paths:
+        print(f"  graph paths: {len(paths)}")
+        for trip in (paths[0].get("triplets") or [])[:3]:
+            s, rel, t = trip.get("source"), trip.get("relation"), trip.get("target")
+            print(
+                f"      {s.get('name')} [{s.get('type')}] "
+                f"--{rel.get('canonical_predicate')}--> {t.get('name')} [{t.get('type')}]"
+            )
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     paths = _paths(args)
     n_names = sum(1 for _ in iter_names(paths.names))
@@ -244,6 +286,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "resolve", help="resolve DEPENDS_ON against all known versions; fill intervals"
     ).set_defaults(func=cmd_resolve)
+
+    hi = sub.add_parser("hydra-ingest", help="push advisory prose into HydraDB")
+    hi.add_argument("--limit", type=int, default=None)
+    hi.set_defaults(func=cmd_hydra_ingest)
+
+    hq = sub.add_parser(
+        "hydra-query", help="natural-language query over the advisory corpus"
+    )
+    hq.add_argument("text")
+    hq.add_argument("--mode", choices=("fast", "thinking"), default="fast")
+    hq.add_argument("--max-results", type=int, default=10)
+    hq.set_defaults(func=cmd_hydra_query)
 
     sim = sub.add_parser("similar", help="build SIMILAR_NAME typosquat edges")
     sim.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
