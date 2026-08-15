@@ -16,7 +16,13 @@ from pathlib import Path
 from blastradius_ingest.registry import Paths, read_ndjson
 from blastradius_ingest.store import Store
 
-__all__ = ["build_graph", "rank_packages"]
+__all__ = [
+    "backfill_affected_intervals",
+    "build_graph",
+    "load_packuments",
+    "rank_packages",
+    "resolve_all_versions",
+]
 
 _DEP_KINDS = (("deps", "prod"), ("peer", "peer"), ("optional", "optional"))
 
@@ -223,6 +229,124 @@ def resolve_latest_versions(store: Store, *, batch: int = 20_000) -> dict[str, i
         )
     store.commit()
     return stats
+
+
+def load_packuments(
+    store: Store, paths: Paths, *, batch: int = 20_000
+) -> dict[str, int]:
+    """Load full version histories from ``packuments.ndjson``.
+
+    The full packument is the only source for per-version publish dates (``time``), and it is
+    also what makes non-latest resolution possible — see ``resolve_all_versions``. It averages
+    ~242KB, so it is fetched only for packages that actually appear in an advisory.
+    """
+    rows: list[tuple[str, str, str | None, int]] = []
+    stats = {"packages": 0, "versions": 0}
+
+    for rec in read_ndjson(paths.packuments):
+        if rec.get("missing"):
+            continue
+        name = rec["name"]
+        stats["packages"] += 1
+        for version, published in (rec.get("times") or {}).items():
+            rows.append((name, version, published, 0))
+            stats["versions"] += 1
+            if len(rows) >= batch:
+                store.upsert_versions(rows)
+                rows.clear()
+    if rows:
+        store.upsert_versions(rows)
+    store.commit()
+    return stats
+
+
+def resolve_all_versions(store: Store, *, batch: int = 20_000) -> dict[str, int]:
+    """Resolve DEPENDS_ON edges against **every** known version of the target, not just latest.
+
+    This is what npm itself does: pick the highest version satisfying the declared range.
+    Resolving only against latest makes ``acorn-node -> acorn@^7.0.0`` unresolvable whenever
+    ``acorn`` has moved to 8.x, which in turn makes the blast radius of *any* non-latest
+    version come back empty — the wrong answer for precisely the incidents that matter.
+
+    Only runs where multi-version history exists (i.e. packages whose packument was fetched),
+    so it strictly adds resolutions and never overwrites one made from a lockfile.
+    """
+    import nodesemver
+
+    versions: dict[str, list[str]] = {}
+    for row in store.conn.execute("SELECT pkg, version FROM version"):
+        versions.setdefault(row["pkg"], []).append(row["version"])
+
+    stats = {"resolved": 0, "no_satisfying_version": 0, "target_out_of_scope": 0}
+    updates: list[tuple[str, str, str, str, str]] = []
+
+    for row in store.conn.execute(
+        "SELECT src_pkg, src_version, dst_pkg, dep_type, range FROM depends_on "
+        "WHERE resolved IS NULL"
+    ).fetchall():
+        candidates = versions.get(row["dst_pkg"])
+        if not candidates:
+            stats["target_out_of_scope"] += 1
+            continue
+        try:
+            best = nodesemver.max_satisfying(
+                candidates, row["range"] or "*", loose=True
+            )
+        except Exception:  # noqa: BLE001 - non-semver specifiers (git:, file:, workspace:)
+            best = None
+        if best is None:
+            stats["no_satisfying_version"] += 1
+            continue
+        updates.append(
+            (
+                str(best),
+                row["src_pkg"],
+                row["src_version"],
+                row["dst_pkg"],
+                row["dep_type"],
+            )
+        )
+        stats["resolved"] += 1
+        if len(updates) >= batch:
+            store.conn.executemany(
+                "UPDATE depends_on SET resolved = ? WHERE src_pkg = ? AND src_version = ? "
+                "AND dst_pkg = ? AND dep_type = ?",
+                updates,
+            )
+            updates.clear()
+
+    if updates:
+        store.conn.executemany(
+            "UPDATE depends_on SET resolved = ? WHERE src_pkg = ? AND src_version = ? "
+            "AND dst_pkg = ? AND dep_type = ?",
+            updates,
+        )
+    store.commit()
+    return stats
+
+
+def backfill_affected_intervals(store: Store) -> dict[str, int]:
+    """Fill AFFECTED_BY validity intervals from real version publish dates.
+
+    ``valid_from`` is when the *introduced* version was published — when the package actually
+    became vulnerable — not when the advisory was disclosed. ``valid_to`` is when the *fixed*
+    version shipped. That distinction is what lets a lockfile from before the GHSA existed
+    still test positive. Rows whose bounds have no known publish date are left NULL rather
+    than guessed from the disclosure date.
+    """
+    updated = store.conn.execute(
+        "UPDATE affected_by SET "
+        "  valid_from = (SELECT v.published_at FROM version v "
+        "                WHERE v.pkg = affected_by.pkg AND v.version = affected_by.introduced), "
+        "  valid_to = (SELECT v.published_at FROM version v "
+        "              WHERE v.pkg = affected_by.pkg AND v.version = affected_by.fixed) "
+        "WHERE valid_from IS NULL OR valid_to IS NULL"
+    ).rowcount
+    store.commit()
+    filled = store.conn.execute(
+        "SELECT COUNT(*) FROM affected_by WHERE valid_from IS NOT NULL"
+    ).fetchone()[0]
+    return {"rows_touched": updated, "with_valid_from": filled}
 
 
 def load_fixture_paths(root: Path) -> Paths:

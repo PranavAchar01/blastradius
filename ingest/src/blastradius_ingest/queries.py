@@ -71,7 +71,6 @@ def _now_ms() -> float:
     return time.perf_counter() * 1000.0
 
 
-
 # --------------------------------------------------------------------------- Q1
 
 
@@ -480,4 +479,3 @@ def measure(fn: Any, *args: Any, runs: int = 20, **kwargs: Any) -> dict[str, flo
         "mean": sum(samples) / len(samples),
         "max": samples[-1],
     }
-

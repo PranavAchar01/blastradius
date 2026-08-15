@@ -20,9 +20,12 @@ import time
 from pathlib import Path
 
 from blastradius_ingest.build import (
+    backfill_affected_intervals,
     build_graph,
     freeze_ranking,
+    load_packuments,
     rank_packages,
+    resolve_all_versions,
     resolve_latest_versions,
 )
 from blastradius_ingest.osv import HOLDOUT_CUTOFF, download_osv, load_advisories
@@ -135,6 +138,55 @@ def cmd_similar(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_packuments(args: argparse.Namespace) -> int:
+    """Full packuments for advisory-affected packages inside the cap.
+
+    Bounded on purpose: full packuments average ~242KB, so this runs only where the extra
+    versions actually change an answer — packages that have an advisory. See STATE.md B7.
+    """
+    paths = _paths(args)
+    with Store(args.db) as store:
+        targets = [
+            r["pkg"]
+            for r in store.conn.execute(
+                "SELECT DISTINCT af.pkg FROM affected_by af "
+                "JOIN package p ON p.name = af.pkg "
+                "JOIN advisory a ON a.osv_id = af.osv_id "
+                "WHERE a.withheld = 0 AND a.withdrawn IS NULL"
+            )
+        ]
+    print(f"[packuments] {len(targets):,} advisory-affected packages inside the cap")
+    if not targets:
+        print("[packuments] nothing to fetch — build the graph first", file=sys.stderr)
+        return 1
+    t0 = time.monotonic()
+    n = asyncio.run(
+        RegistryClient(paths, concurrency=args.concurrency).fetch_packuments(targets)
+    )
+    print(f"[packuments] +{n:,} in {time.monotonic() - t0:.0f}s -> {paths.packuments}")
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    """Load version histories, then resolve ranges against all known versions."""
+    paths = _paths(args)
+    with Store(args.db) as store:
+        loaded = load_packuments(store, paths)
+        print(f"[resolve] versions loaded: {loaded}")
+        before = store.conn.execute(
+            "SELECT COUNT(*) FROM depends_on WHERE resolved IS NOT NULL"
+        ).fetchone()[0]
+        stats = resolve_all_versions(store)
+        after = store.conn.execute(
+            "SELECT COUNT(*) FROM depends_on WHERE resolved IS NOT NULL"
+        ).fetchone()[0]
+        intervals = backfill_affected_intervals(store)
+    print(f"[resolve] {stats}")
+    print(f"[resolve] resolved edges {before:,} -> {after:,}  (+{after - before:,})")
+    print(f"[resolve] AFFECTED_BY intervals: {intervals}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     paths = _paths(args)
     n_names = sum(1 for _ in iter_names(paths.names))
@@ -182,6 +234,16 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("build", help="assemble the SQLite graph from staged files")
     b.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
     b.set_defaults(func=cmd_build)
+
+    pk = sub.add_parser(
+        "packuments", help="full version histories for advisory-affected packages"
+    )
+    pk.add_argument("--concurrency", type=int, default=8)
+    pk.set_defaults(func=cmd_packuments)
+
+    sub.add_parser(
+        "resolve", help="resolve DEPENDS_ON against all known versions; fill intervals"
+    ).set_defaults(func=cmd_resolve)
 
     sim = sub.add_parser("similar", help="build SIMILAR_NAME typosquat edges")
     sim.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)

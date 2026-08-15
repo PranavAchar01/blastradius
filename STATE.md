@@ -234,10 +234,82 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   Q1 also returns the traversal path as evidence — `mid-lib@2.0.0 --DEPENDS_ON(^1.3.0)-->
   left-pad@1.3.0` — which is what the console renders as proof.
   Truncation is declared in `notes`, never silent.
+- **Aug 15, iter 6** — Caught the worst bug of the build so far by auditing the graph instead
+  of trusting the passing tests. `depends_on.resolved` was NULL on 88.4% of edges; of the ones
+  whose target was *inside* the cap, 20.1% failed to resolve, all of them major-version pins
+  (`acorn-node` wants `acorn@^7.0.0`, we only stored `latest=8.18.0`). Because
+  `blast_radius` matches `dst_pkg = X AND resolved = V`, the closure could only ever answer
+  for a package's **current** version — so any compromise of an older major would have
+  returned "nobody is affected". The earlier `call-bound@1.0.4` test passed only because
+  1.0.4 happened to be latest. Fixed by resolving against all known versions via
+  max-satisfying; `blast_radius(acorn@7.4.1)` went 0 → 3 dependents.
 
 ## Blockers
 
-### B6 — version publish dates not yet loaded, so Q2 cannot date the vulnerable version
+### B6 + B7 — RESOLVED (Aug 15, iter 6)
+
+Both fixed by the packument pass plus `resolve_all_versions`, which resolves declared ranges
+against **every** known version (npm's own max-satisfying rule) instead of only latest.
+
+Evidence — edges that previously could not resolve now do, to the correct older version:
+
+```
+acorn-node            -> acorn        wants ^7.0.0    resolved=7.4.1   (latest=8.18.0)
+acorn-dynamic-import  -> acorn        wants ^6.0.0    resolved=6.4.2   (latest=8.18.0)
+apollo-server-express -> body-parser  wants ^1.19.0   resolved=1.20.6  (latest=2.3.0)
+artillery             -> async        wants ^2.6.4    resolved=2.6.4   (latest=3.2.6)
+```
+
+And the query that used to return nothing now returns the right answer:
+
+```
+blast_radius(acorn@7.4.1)  [non-latest] -> 3 dependents  (was 0)
+blast_radius(acorn@8.18.0) [latest]     -> 16 dependents
+```
+
+B6 closed too: AFFECTED_BY intervals are now dated from real publish times, e.g. `bootstrap`
+GHSA-3wqf-4x89-9g79 vulnerable from `2018-01-18T18:34:21Z` to `2018-07-12T16:38:44Z`.
+`valid_from` is when the introduced version *shipped*, not when the advisory was disclosed —
+which is what lets a lockfile predating the GHSA still test positive.
+
+Seven regression tests pin this (`tests/test_resolution.py`), including the baseline showing
+latest-only resolution returning 0, that a range no version satisfies stays NULL rather than
+snapping to something close, and that `git:`/`file:` specifiers are left unresolved.
+
+**Remaining scope note:** only 62 advisory-affected packages are inside the current top-2,000
+cap, so just 56 of 230,017 AFFECTED_BY rows carry intervals so far. Both numbers grow with the
+full 25k cap; the packument pass is re-run after the ranking completes.
+
+#### Original finding — blast radius only answered for a package's *latest* version (CRITICAL)
+
+Measured on the current graph: of `depends_on` edges whose target is inside the cap, **79.9%
+resolve and 20.1% do not**, and the failures are all major-version pins —
+`acorn-node` wants `acorn@^7.0.0` but the only version row we hold is `latest=8.18.0`;
+`apollo-server-express` wants `body-parser@^1.19.0` against `latest=2.3.0`.
+
+Root cause: the `latest` stage stores exactly one version per package, so a declared range can
+only resolve when the package's *current* version satisfies it. `blast_radius` then matches on
+`dst_pkg = X AND resolved = V`, so it can only find dependents when **V is the latest version**.
+
+Consequence, stated plainly: if a compromise affects an older major, every dependent pins that
+older major, none of them resolve, and the closure comes back **empty** — the single most
+important query silently answers "nobody is affected" for exactly the incidents that matter
+most. The earlier `call-bound@1.0.4` test passed only because 1.0.4 *was* latest.
+
+**Fix (bounded, and it subsumes B6):** the `fetch_packuments` stage already retrieves full
+packuments, which carry every version plus `time`. Run it for advisory-affected packages inside
+the cap (~thousands, not 25k), store their full version lists, and resolve declared ranges
+against all known versions rather than just latest. That makes the closure correct for any
+version of any package that actually has an advisory — precisely the use case — and fills in
+`published_at` for B6 at the same time.
+
+Until that lands, any blast-radius number for a non-latest version is a floor, not a count, and
+must not be reported as recall.
+
+
+### B6 — RESOLVED, see the combined B6+B7 entry above
+
+#### Original finding — version publish dates not loaded, so Q2 could not date the vulnerable version
 
 `introducing_version` returns the correct `introduced`/`fixed` bounds, but
 `introduced_published_at` comes back `NULL` on real data because only latest-version rows carry
