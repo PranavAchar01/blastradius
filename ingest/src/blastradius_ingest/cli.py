@@ -19,6 +19,12 @@ import sys
 import time
 from pathlib import Path
 
+from blastradius_ingest.build import (
+    build_graph,
+    freeze_ranking,
+    rank_packages,
+    resolve_latest_versions,
+)
 from blastradius_ingest.osv import HOLDOUT_CUTOFF, download_osv, load_advisories
 from blastradius_ingest.registry import Paths, RegistryClient, iter_names, read_ndjson
 from blastradius_ingest.store import Store
@@ -32,17 +38,11 @@ def _paths(args: argparse.Namespace) -> Paths:
     return Paths(Path(args.data))
 
 
-def top_names(paths: Paths, top_n: int) -> list[str]:
-    """The top-N package names by weekly downloads, highest first.
-
-    Ties are broken by name so the cap is deterministic across runs — otherwise the set of
-    packages in the graph would drift between ingests and the eval would not be reproducible.
-    """
-    ranked = sorted(
-        ((rec["downloads"], rec["name"]) for rec in read_ndjson(paths.downloads)),
-        key=lambda t: (-t[0], t[1]),
-    )
-    return [name for _, name in ranked[:top_n]]
+def cmd_rank(args: argparse.Namespace) -> int:
+    paths = _paths(args)
+    n = freeze_ranking(paths, args.top_n)
+    print(f"[rank] froze top {n:,} packages -> {paths.ranked}")
+    return 0
 
 
 def cmd_names(args: argparse.Namespace) -> int:
@@ -57,7 +57,9 @@ def cmd_downloads(args: argparse.Namespace) -> int:
     paths = _paths(args)
     t0 = time.monotonic()
     n = asyncio.run(
-        RegistryClient(paths, concurrency=args.concurrency).fetch_downloads()
+        RegistryClient(paths, concurrency=args.concurrency).fetch_downloads(
+            scope=args.scope
+        )
     )
     dt = time.monotonic() - t0
     rate = n / dt if dt else 0
@@ -67,9 +69,13 @@ def cmd_downloads(args: argparse.Namespace) -> int:
 
 def cmd_latest(args: argparse.Namespace) -> int:
     paths = _paths(args)
-    names = top_names(paths, args.top_n)
+    try:
+        names = [name for name, _, _ in rank_packages(paths, args.top_n)]
+    except FileNotFoundError as exc:
+        print(f"[latest] {exc}", file=sys.stderr)
+        return 1
     if not names:
-        print("[latest] no ranked names yet — run `downloads` first", file=sys.stderr)
+        print("[latest] frozen ranking is empty", file=sys.stderr)
         return 1
     t0 = time.monotonic()
     n = asyncio.run(
@@ -97,6 +103,22 @@ def cmd_advisories(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build(args: argparse.Namespace) -> int:
+    paths = _paths(args)
+    t0 = time.monotonic()
+    with Store(args.db) as store:
+        stats = build_graph(store, paths, top_n=args.top_n)
+        res = resolve_latest_versions(store)
+        counts = store.counts()
+    print(f"[build] {time.monotonic() - t0:.0f}s")
+    for k, v in {**stats, **res}.items():
+        print(f"  {k:22} {v:,}")
+    print("[build] table counts:")
+    for k, v in counts.items():
+        print(f"  {k:16} {v:,}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     paths = _paths(args)
     n_names = sum(1 for _ in iter_names(paths.names))
@@ -119,13 +141,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     d = sub.add_parser("downloads", help="fetch weekly download counts")
-    d.add_argument("--concurrency", type=int, default=24)
+    d.add_argument("--concurrency", type=int, default=10)
+    d.add_argument(
+        "--scope",
+        choices=("unscoped", "scoped", "all"),
+        default="unscoped",
+        help=(
+            "which half of the registry to price. Defaults to unscoped: the bulk endpoint "
+            "rejects scoped names and rate-limits single lookups to ~3 req/s (see B4), so "
+            "scoped packages are priced from a candidate set instead."
+        ),
+    )
     d.set_defaults(func=cmd_downloads)
 
     latest = sub.add_parser("latest", help="fetch deps + maintainers for the top-N")
     latest.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
     latest.add_argument("--concurrency", type=int, default=24)
     latest.set_defaults(func=cmd_latest)
+
+    rk = sub.add_parser("rank", help="freeze the top-N coverage cap to ranked.tsv")
+    rk.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
+    rk.set_defaults(func=cmd_rank)
+
+    b = sub.add_parser("build", help="assemble the SQLite graph from staged files")
+    b.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
+    b.set_defaults(func=cmd_build)
 
     adv = sub.add_parser("advisories", help="ingest the OSV npm advisory corpus")
     adv.add_argument(

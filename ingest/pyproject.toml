@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
+    "node-semver>=0.9.1",
 ]
 
 [project.scripts]
@@ -24,3 +25,10 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.3",
 ]
+
+[tool.mypy]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["nodesemver.*"]
+ignore_missing_imports = true

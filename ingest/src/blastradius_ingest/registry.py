@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -67,6 +68,17 @@ class Paths:
     @property
     def osv_zip(self) -> Path:
         return self.root / "osv-npm-all.zip"
+
+    @property
+    def ranked(self) -> Path:
+        """The frozen coverage cap: ``name<TAB>downloads``, highest first.
+
+        Written once by ``rank``. Both ``latest`` and ``build`` read *this*, never
+        ``downloads.ndjson`` directly — recomputing the ranking from a file that is still
+        being appended to made the top-N a moving target, so ``latest`` fetched one set and
+        ``build`` looked for a different one (505 of 2000 overlapped).
+        """
+        return self.root / "ranked.tsv"
 
     def ensure(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -142,10 +154,22 @@ class RegistryClient:
     # ------------------------------------------------------------------ http
 
     async def _get(
-        self, client: httpx.AsyncClient, url: str, *, retries: int = 4
-    ) -> httpx.Response | None:
-        """GET with bounded retry and exponential backoff. Returns None on give-up."""
-        delay = 1.0
+        self, client: httpx.AsyncClient, url: str, *, retries: int = 6
+    ) -> httpx.Response | None | Literal["gone"]:
+        """GET with bounded retry and backoff.
+
+        Three-way result, because conflating the last two silently corrupts the corpus:
+
+        ``Response``  success
+        ``"gone"``    the resource genuinely does not exist (404/410)
+        ``None``      transient failure — rate limited or unreachable after ``retries``
+
+        Callers must NOT persist a negative record for ``None``. An earlier version wrote
+        ``{"missing": true}`` for both cases, and because the resume logic skips anything
+        already written, 990 of 2000 rate-limited ``/latest`` fetches were cached as
+        permanent absences for packages that plainly exist (chalk, ajv, acorn).
+        """
+        delay = 2.0
         for attempt in range(retries):
             async with self._sem:
                 try:
@@ -155,13 +179,19 @@ class RegistryClient:
             if r is not None:
                 if r.status_code == 200:
                     return r
-                if r.status_code == 404:
-                    return None  # genuinely absent; not worth retrying
-                if r.status_code < 500 and r.status_code != 429:
-                    return None
+                if r.status_code in (404, 410):
+                    return "gone"
+                if r.status_code not in (429, 408) and r.status_code < 500:
+                    return "gone"
+                if r.status_code == 429:
+                    # Cloudflare fronts registry.npmjs.org and does send Retry-After.
+                    retry_after = r.headers.get("retry-after")
+                    if retry_after and retry_after.isdigit():
+                        delay = max(delay, float(retry_after))
+                    self._throttled = True
             if attempt < retries - 1:
-                await asyncio.sleep(delay)
-                delay *= 2
+                await asyncio.sleep(delay + random.uniform(0, delay * 0.25))
+                delay = min(delay * 2, 120.0)
         return None
 
     # ------------------------------------------------------- stage: names
@@ -189,6 +219,9 @@ class RegistryClient:
                     if r is None:
                         print("[names] request failed after retries; stopping")
                         break
+                    if r == "gone":
+                        print(f"[names] {url} returned 4xx; stopping")
+                        break
 
                     rows = r.json().get("rows", [])
                     if (
@@ -213,16 +246,29 @@ class RegistryClient:
 
     # --------------------------------------------------- stage: downloads
 
-    async def fetch_downloads(self) -> int:
-        """Weekly download counts for every name.
+    async def fetch_downloads(
+        self, *, scope: str = "all", candidates: Sequence[str] | None = None
+    ) -> int:
+        """Weekly download counts.
 
-        Unscoped names go through the 128-wide bulk endpoint; scoped names must be fetched
-        one at a time because the bulk endpoint rejects them.
+        ``scope`` selects which half of the registry to price:
+
+        ``unscoped``  the 2.67M unscoped names, via the 128-wide bulk endpoint (20,844 calls)
+        ``scoped``    scoped names one at a time, because bulk rejects them
+        ``all``       both
+
+        ``candidates`` restricts the work to an explicit list, which is how the scoped half is
+        made tractable — see B4 in STATE.md. Pricing all 1.62M scoped names measured at ~3 req/s
+        under server-side rate limiting (~22h), so only scoped packages with evidence of real
+        use are priced.
         """
         done = {rec["name"] for rec in read_ndjson(self.paths.downloads)}
-        names = [n for n in iter_names(self.paths.names) if n not in done]
-        unscoped = [n for n in names if not n.startswith("@")]
-        scoped = [n for n in names if n.startswith("@")]
+        source = candidates if candidates is not None else iter_names(self.paths.names)
+        names = [n for n in source if n not in done]
+        unscoped = (
+            [n for n in names if not n.startswith("@")] if scope != "scoped" else []
+        )
+        scoped = [n for n in names if n.startswith("@")] if scope != "unscoped" else []
         print(
             f"[downloads] {len(done):,} done; {len(unscoped):,} unscoped + "
             f"{len(scoped):,} scoped remaining"
@@ -237,8 +283,13 @@ class RegistryClient:
                 async def do_bulk(batch: Sequence[str]) -> None:
                     nonlocal written
                     r = await self._get(client, f"{DOWNLOADS}/{','.join(batch)}")
+                    if r is None:
+                        # Rate limited after retries: leave the batch unpriced so the next
+                        # run re-fetches it. Writing zeros here would silently rank real
+                        # packages out of the coverage cap.
+                        return
                     recs: list[dict[str, Any]] = []
-                    if r is not None:
+                    if r != "gone":
                         payload = r.json()
                         # A single-name batch returns a bare object, not a map.
                         if "downloads" in payload and "package" in payload:
@@ -265,8 +316,10 @@ class RegistryClient:
                     nonlocal written
                     quoted = name.replace("/", "%2f")
                     r = await self._get(client, f"{DOWNLOADS}/{quoted}")
+                    if r is None:
+                        return  # transient; retry on the next run rather than pricing at 0
                     dl = 0
-                    if r is not None:
+                    if r != "gone":
                         try:
                             dl = r.json().get("downloads", 0) or 0
                         except json.JSONDecodeError:
@@ -310,6 +363,10 @@ class RegistryClient:
                     quoted = name.replace("/", "%2f")
                     r = await self._get(client, f"{REGISTRY}/{quoted}/latest")
                     if r is None:
+                        # Transient (rate limit / network). Write nothing so the next run
+                        # retries it, rather than caching a false absence.
+                        return
+                    if r == "gone":
                         rec: dict[str, Any] = {"name": name, "missing": True}
                     else:
                         try:
@@ -361,6 +418,8 @@ class RegistryClient:
                     quoted = name.replace("/", "%2f")
                     r = await self._get(client, f"{REGISTRY}/{quoted}")
                     if r is None:
+                        return  # transient; retried on the next run
+                    if r == "gone":
                         rec: dict[str, Any] = {"name": name, "missing": True}
                     else:
                         try:

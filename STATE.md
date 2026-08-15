@@ -170,6 +170,32 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   an IPv4 local address fixed it. Also: `_all_docs?limit=25000` returns 400; 5000 is the
   working page size. And the download stages now stream through a worker pool — the old
   approach built one coroutine per item, which 1.62M scoped names would have OOM'd.
+- **Aug 14, iter 3** — Three correctness bugs, all found by checking output against reality
+  rather than trusting green exit codes:
+  1. **False negatives cached as permanent.** `/latest` was returning 429 (Cloudflare) for
+     ~50% of requests, and the code recorded those as `{"missing": true}` — which the resume
+     logic then skips forever. 990 of 2000 real packages (chalk, ajv, acorn) were written off
+     as nonexistent. `_get` now returns a three-way result (response / `"gone"` / transient),
+     honours `Retry-After`, and callers persist **nothing** on transient failure so the next
+     run retries. Purged the 990 poisoned records.
+  2. **Moving-target coverage cap.** `latest` and `build` each recomputed the top-N from
+     `downloads.ndjson` while that file was still being appended to, so they saw different
+     sets — only 505 of 2000 overlapped, which is why the first build produced 2000 packages
+     but 505 versions. The cap is now frozen once to `ranked.tsv` by a new `rank` stage, and
+     both stages read that.
+  3. **Fabricated dependency resolution.** `resolve_latest_versions` set `resolved = latest`
+     unconditionally. `chalk` declares `ansi-styles: ^4.1.0`; marking that resolved to 7.0.0
+     invents an edge that does not exist *and* hides the real one — blast radius wrong in
+     both directions. Now checks the declared range with npm semver semantics
+     (`nodesemver.satisfies`) and leaves the edge NULL when the range excludes latest
+     (198/6805 on the validation slice). True historical resolution comes from lockfiles via
+     RESOLVED_TO, which is where resolution actually happens.
+- **Aug 14, iter 3** — Validation slice (top 2,000) builds coherently: 2,000 packages /
+  1,999 versions / 2,457 maintainers / 6,805 DEPENDS_ON. Reverse traversal verified against
+  the SQL reverse index — `call-bound@1.0.4` returns 8 transitive dependents across 2 depths
+  (`array.prototype.*`, all genuine). npm rate-limits hard: sustained ~199 names/s on bulk
+  downloads and ~3/s on `/latest` at concurrency 4, with zero failures once concurrency is
+  kept low. Full sweep is ~3.5h + ~2.3h, running in background.
 
 ## Blockers
 
