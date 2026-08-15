@@ -76,8 +76,11 @@ excluded from the `1.3.0` closure at depth 1 — the discriminating case a simil
 wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
 
 ## P2 — Ingest at ecosystem scale
-- [ ] npm replication: packages + versions + maintainers (resumable, checkpointed)
-- [ ] OSV + GitHub Advisory Database → affected package/version ranges
+- [x] npm replication: **all 4,291,086 package names** pulled from `replicate.npmjs.com/_all_docs`
+      (resumable, checkpointed). Versions + maintainers come from the `latest` stage, which is
+      gated on ranking — see B4.
+- [x] OSV + GitHub Advisory Database → affected package/version ranges
+      (226,832 advisories, 230,023 AFFECTED_BY edges, 6s)
 - [ ] SIMILAR_NAME edges (damerau-levenshtein ≤2 vs top-N by downloads)
 - [ ] Hold out advisories after cutoff date → eval set, recorded in EVAL.md
 - [ ] Log throughput, node/edge counts, cost here
@@ -146,8 +149,54 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   `resolved`-version discriminator (top-app dev-depends on left-pad@1.2.0, not 1.3.0) is exactly
   the case that separates a real closure from a plausible one, and it now has a regression test.
   Half-open interval semantics chosen so a boundary touch is not an overlap.
+- **Aug 14, iter 2** — P2 underway. All 4,291,086 npm names pulled. OSV npm corpus loaded:
+  226,832 advisories / 230,023 AFFECTED_BY edges in 6s. Composition was the surprise —
+  **219,676 (96.8%) are `MAL-*` malicious-package reports**, only 7,155 GHSA. MAL entries name
+  222k mostly-zero-download packages, so they carry no blast radius, but they are labeled
+  ground truth for the typosquat question (Q5) — a real eval set rather than a toy one.
+- **Aug 14, iter 2** — Three real bugs caught by looking at the data instead of trusting it:
+  (1) a record in the npm bucket had `ecosystem: "Hex"` (`EEF-CVE-2026-56812`, package
+  `phoenix`), so ecosystem must be filtered *per affected entry*, not per file — the corrected
+  count is 226,832 of 226,833 files, and that one rejection is the Hex record;
+  (2) OSV `withdrawn` was not being captured, so retracted advisories (e.g. the express
+  "Withdrawn Advisory" GHSA-pj86-cfqh-vqx6) would have counted as live exposure;
+  (3) MAL `details` are per-scanner boilerplate — 130MB of the 136MB details column — dropped,
+  taking the DB from 239.5MB to 84.1MB and back under GitHub's 100MB file limit.
+  Multi-window ranges verified preserved (`@solana/web3.js` GHSA-8m45-2rjm-j347 has 92 disjoint
+  windows; collapsing to min/max would mark the safe gaps as vulnerable).
+- **Aug 14, iter 2** — Networking: every npm host was intermittently failing (~30%) until I
+  traced it to a dead IPv6 route on this machine — `EHOSTUNREACH` on every AAAA plus
+  `ETIMEDOUT` on IPv4, while `example.com` and Google storage stayed clean. Binding httpx to
+  an IPv4 local address fixed it. Also: `_all_docs?limit=25000` returns 400; 5000 is the
+  working page size. And the download stages now stream through a worker pool — the old
+  approach built one coroutine per item, which 1.62M scoped names would have OOM'd.
 
 ## Blockers
+
+### B4 — npm downloads API cannot be enumerated for 1.62M scoped packages (shapes P2 coverage)
+
+The bulk downloads endpoint takes 128 names per call but **rejects scoped packages outright**
+(`scoped packages are not currently supported in bulk lookups`). Of 4,291,086 names,
+**2,667,953 are unscoped** (20,844 bulk calls — fine) and **1,623,133 are scoped**, which would
+need one call each. Measured:
+
+```
+sequential, 150ms spacing:  12/12 -> 200,  avg 513ms          (API is healthy at low rate)
+pooled concurrency=32:    1200 reqs, 393.7s =  3.0/s, 903 err (75% failure)
+pooled concurrency=96:    1200 reqs, 466.1s =  2.6/s, 838 err (70% failure — worse)
+```
+
+Failure rate *rises* with concurrency, so this is server-side rate limiting, not local. At a
+sustainable ~20 req/s the scoped sweep alone is ~22 hours, which does not fit the remaining
+budget alongside P3–P7. Not a code bug and not fixable by tuning.
+
+**Plan (next iteration):** rank all 2.67M unscoped exhaustively via bulk, then build a bounded
+scoped *candidate* set from three sources — scoped packages appearing as dependencies of ranked
+packages, scoped packages named in the advisory corpus, and npm's own popularity search — and
+price only those. The methodology and the measured miss rate against known-popular scoped
+packages both go in README and EVAL.md. No silent truncation.
+
+
 
 ### B1 — RESOLVED by architecture decision (Aug 14, iter 1)
 
