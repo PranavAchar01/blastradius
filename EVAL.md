@@ -91,6 +91,33 @@ Will contain, per question Q1–Q6: precision, recall, p50/p95 latency, cost per
 number of held-out advisories scored, and the number excluded for falling outside the coverage
 cap.
 
+## 3b. HydraDB semantic layer — measured
+
+The corpus is **4,250 usable GHSA advisories** (held-out, withdrawn, and `MAL-*` records all
+excluded — the eval set must not leak into the semantic index any more than into the graph).
+
+Ingest, measured rather than assumed: 25 documents per multipart request in 2.0s, reaching
+`completed` — including HydraDB's own graph extraction — in 45s. A 40-document random sample
+re-checked afterwards was 40/40 `completed`. Ingest is rate-limited with HTTP 429, so batches
+honour `Retry-After`; the full push took 53 minutes wall-clock, almost all of it backoff.
+
+Retrieval quality, `mode="fast"`, on queries that name **no package at all**:
+
+| query | top hit | score |
+| --- | --- | ---: |
+| malicious postinstall script that steals environment variables and credentials | `GHSA-f29h-pxvx-f335` — eslint-config-prettier, the real July 2025 compromise | 0.913 |
+| prototype pollution in a deep merge utility | `GHSA-9g9w-hmvj-5h57` — merge-deep | 0.945 |
+| regular expression denial of service from a catastrophic backtracking pattern | `GHSA-rmvr-2pp2-xj38` — @octokit | 0.952 |
+| arbitrary file write via path traversal when extracting an archive | `GHSA-884w-698f-927f` — unzipper | 0.954 |
+| compromised maintainer account published a backdoored release | `GHSA-8j7x-pr59-m5h8` — the Sept 2020 malicious-package cluster | 0.835 |
+
+Server latency across those queries: **min 527ms, mean 735ms, max 853ms**.
+
+This is the half of the problem the graph cannot do. None of those query strings share a token
+with the package names they correctly retrieve, so no `LIKE`, no index, and no traversal over
+the same corpus returns them. It is also why `mode="fast"` is the console default: `thinking`
+measured 3.2s server-side in P0, which alone would blow the sub-second budget.
+
 ## 4. Vector/embedding baseline — **pending**
 
 Not yet run. Will report what a semantic-similarity approach returns for the same six
