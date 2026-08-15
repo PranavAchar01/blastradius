@@ -255,6 +255,19 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   `fast` mode. No SQL predicate over the same corpus finds that; this is the half of the
   problem the graph genuinely cannot do, and it is why the split in SCHEMA.md §0 is real
   rather than decorative.
+- **Aug 15, iter 8** — Download sweep finished: **all 2,667,953 unscoped packages priced**
+  (the last 8,960 were one contiguous block of spam names that had failed together; re-running
+  picked them up in 41s, so coverage of the unscoped half is exact rather than approximate).
+  Ranking sanity-checks against reality: semver 832M/week, minimatch 692M, debug 685M,
+  ansi-styles 665M. Rank 25,000 sits at 14,641 downloads/week; 539,518 packages have zero.
+- **Aug 15, iter 8** — Counter-intuitive throughput finding on the `latest` stage, worth
+  keeping: **concurrency 10 achieved ~5 packages/min; concurrency 4 achieves ~1,507/min** —
+  a 300× speedup from *lowering* parallelism. A hand probe of the same endpoint was healthy
+  throughout (10/10 200s, 348ms avg), so the collapse was entirely self-inflicted: high
+  concurrency trips npm's 429s, and each retry burns up to 120s of exponential backoff, so
+  every worker ends up sleeping rather than fetching. Default lowered to 4 with a comment
+  not to raise it without re-measuring. Same root cause as the earlier scoped-downloads
+  measurement (B4), where throughput also fell as concurrency rose.
 
 ## Blockers
 

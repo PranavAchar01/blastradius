@@ -266,7 +266,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     latest = sub.add_parser("latest", help="fetch deps + maintainers for the top-N")
     latest.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
-    latest.add_argument("--concurrency", type=int, default=24)
+    # Measured: concurrency 10 collapses to ~5 packages/min because 429s send every worker
+    # into exponential backoff; concurrency 4 sustains ~1,500/min. Lower is dramatically
+    # faster here — do not raise this without re-measuring.
+    latest.add_argument("--concurrency", type=int, default=4)
     latest.set_defaults(func=cmd_latest)
 
     rk = sub.add_parser("rank", help="freeze the top-N coverage cap to ranked.tsv")
