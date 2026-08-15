@@ -83,7 +83,9 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
       (226,832 advisories, 230,023 AFFECTED_BY edges, 6s)
 - [x] SIMILAR_NAME edges (damerau-levenshtein ≤2 vs top-N by downloads) — implemented and
       validated; final run pending the full ranking
-- [ ] Hold out advisories after cutoff date → eval set, recorded in EVAL.md
+- [x] Hold out advisories after cutoff date → eval set, recorded in [EVAL.md](EVAL.md)
+      (cutoff `2026-01-01`; 12,933 held out — 10,164 MAL-* + 2,769 GHSA; enforced once at
+      load time so it cannot leak at a call site)
 - [ ] Log throughput, node/edge counts, cost here
 
 **GATE:** graph loaded; counts reported; a real advisory's reverse-dep closure hand-checked vs npm.
@@ -209,6 +211,18 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   giving pairs like `-` ~ `ai`/`0x`/`ci`. Threshold is now length-relative (distance 1 only
   for names ≤6 chars, minimum name length 3), which cut the set to 12,264 and left genuinely
   plausible pairs (`@apollo/server ~ apollo-server`, `aframe-testras ~ aframe-extras`).
+- **Aug 15, iter 5** — EVAL.md written with the held-out set recorded: cutoff `2026-01-01`,
+  12,933 advisories withheld (10,164 MAL-* + 2,769 GHSA), 650 OSV-withdrawn excluded from
+  both sides, range 2026-01-01…2026-08-14. Two caveats recorded rather than smoothed over:
+  the held-out set is 79% MAL-* (zero-download packages that carry no blast radius, so
+  Q1/Q3/Q6 and Q5 must be scored separately, not blended), and only advisories whose package
+  is inside the coverage cap can be scored — that excluded count gets reported next to every
+  score, because an advisory for a package never ingested is a coverage limit, not a
+  retrieval miss.
+- **Aug 15, iter 5** — npm's throttling is not steady: the bulk sweep drifts between ~11 and
+  ~200 names/s over hours, while a hand probe of the same endpoint returns 200 in <500ms
+  throughout. So it is per-connection shaping, not a global block, and the job is best left
+  to run rather than tuned. 61% priced.
 
 ## Blockers
 
