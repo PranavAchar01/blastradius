@@ -81,7 +81,8 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
       gated on ranking — see B4.
 - [x] OSV + GitHub Advisory Database → affected package/version ranges
       (226,832 advisories, 230,023 AFFECTED_BY edges, 6s)
-- [ ] SIMILAR_NAME edges (damerau-levenshtein ≤2 vs top-N by downloads)
+- [x] SIMILAR_NAME edges (damerau-levenshtein ≤2 vs top-N by downloads) — implemented and
+      validated; final run pending the full ranking
 - [ ] Hold out advisories after cutoff date → eval set, recorded in EVAL.md
 - [ ] Log throughput, node/edge counts, cost here
 
@@ -196,8 +197,39 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   (`array.prototype.*`, all genuine). npm rate-limits hard: sustained ~199 names/s on bulk
   downloads and ~3/s on `/latest` at concurrency 4, with zero failures once concurrency is
   kept low. Full sweep is ~3.5h + ~2.3h, running in background.
+- **Aug 15, iter 4** — SIMILAR_NAME built with true Damerau-Levenshtein (transposition costs
+  1, so `lodash`→`lodahs` is 1 — plain Levenshtein says 2 and misses the commonest squat).
+  rapidfuzz does ~21M pairs/s; bucketing on length (DL≤2 implies `abs(len(a)-len(b))≤2`) turns
+  a 107B-pair sweep into 164s over all 4,291,086 names.
+  It immediately caught real OSV-confirmed malicious packages: `axois`/`axioss`→axios,
+  `bulebird`/`blueibrd`/`blubird`→bluebird, and eleven chalk squats (`cahlk`, `chakl`,
+  `chalq`, `chlak`, `shalk`, …).
+- **Aug 15, iter 4** — First pass produced 115,545 edges, of which the distance-2 tier was
+  junk for short names: a 1-character package is within 2 edits of *every* 2-character name,
+  giving pairs like `-` ~ `ai`/`0x`/`ci`. Threshold is now length-relative (distance 1 only
+  for names ≤6 chars, minimum name length 3), which cut the set to 12,264 and left genuinely
+  plausible pairs (`@apollo/server ~ apollo-server`, `aframe-testras ~ aframe-extras`).
 
 ## Blockers
+
+### B5 — `rank_gap` does not discriminate among unranked candidates (quality limit, not a bug)
+
+`rank_gap` is `candidate_rank - target_rank`, and every candidate outside the coverage cap gets
+the same sentinel rank, so filtering at `>1M` and `>4M` returns an identical 4,057 edges. The
+signal is effectively binary (ranked vs unranked) rather than graded.
+
+Consequence for the eval: SIMILAR_NAME must be reported as a **candidate generator**, not a
+classifier. Precision against OSV `MAL-*` labels is 2.3% at distance 1 — which is the expected
+and correct number, because most distance-1 neighbours of a popular package are perfectly
+legitimate (`angulartics2 ~ angulartics`), and the MAL label set only covers squats that were
+caught. Recall is the meaningful metric and is exhaustive by construction; against just the
+top-2,000 it already catches 207 distinct known-malicious packages.
+
+**Refinement available:** weekly downloads are already collected for every unscoped candidate,
+so "5 downloads/week and one edit from lodash" is a far sharper signal than rank alone. Fold
+the candidate's own download count into the ranking the console shows, and report both numbers
+in EVAL.md rather than claiming precision the edge type cannot deliver.
+
 
 ### B4 — npm downloads API cannot be enumerated for 1.62M scoped packages (shapes P2 coverage)
 

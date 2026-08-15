@@ -27,6 +27,7 @@ from blastradius_ingest.build import (
 )
 from blastradius_ingest.osv import HOLDOUT_CUTOFF, download_osv, load_advisories
 from blastradius_ingest.registry import Paths, RegistryClient, iter_names, read_ndjson
+from blastradius_ingest.similar import build_similar_names
 from blastradius_ingest.store import Store
 
 DEFAULT_DATA = Path(__file__).resolve().parents[3] / "data"
@@ -119,6 +120,21 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_similar(args: argparse.Namespace) -> int:
+    paths = _paths(args)
+    ranked = rank_packages(paths, args.top_n)
+    if not ranked:
+        print("[similar] no frozen ranking — run `rank` first", file=sys.stderr)
+        return 1
+    candidates = list(iter_names(paths.names))
+    print(f"[similar] {len(candidates):,} candidates vs top {len(ranked):,}")
+    with Store(args.db) as store:
+        stats = build_similar_names(store, candidates, ranked)
+    for k, v in stats.items():
+        print(f"  {k:10} {v:,}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     paths = _paths(args)
     n_names = sum(1 for _ in iter_names(paths.names))
@@ -166,6 +182,10 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("build", help="assemble the SQLite graph from staged files")
     b.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
     b.set_defaults(func=cmd_build)
+
+    sim = sub.add_parser("similar", help="build SIMILAR_NAME typosquat edges")
+    sim.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
+    sim.set_defaults(func=cmd_similar)
 
     adv = sub.add_parser("advisories", help="ingest the OSV npm advisory corpus")
     adv.add_argument(
