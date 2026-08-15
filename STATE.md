@@ -223,8 +223,33 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   ~200 names/s over hours, while a hand probe of the same endpoint returns 200 in <500ms
   throughout. So it is per-connection shaping, not a global block, and the job is best left
   to run rather than tuned. 61% priced.
+- **Aug 15, iter 5** — P3 query engine written and tested (29 tests pass). All six questions
+  run against the real graph; the temporal one is the load-bearing result: with a lockfile
+  that pinned `call-bound@1.0.4` at 09:01 and reverted at 09:05, Q3 returns **1 exposed
+  service for the 09:00–09:06 window and 0 for 10:00–11:00**. A present-tense view of the
+  same graph shows the service clean, which is exactly the failure SCHEMA.md §3 predicted.
+  Measured latencies on the partial graph: Q1 1.38ms, Q2 0.72ms, Q3 0.11ms, Q4 2.83ms,
+  Q5 13.95ms, Q6 0.34ms. Reverse traversal is level-batched (one statement per BFS depth,
+  whole frontier bound at once) rather than one statement per node.
+  Q1 also returns the traversal path as evidence — `mid-lib@2.0.0 --DEPENDS_ON(^1.3.0)-->
+  left-pad@1.3.0` — which is what the console renders as proof.
+  Truncation is declared in `notes`, never silent.
 
 ## Blockers
+
+### B6 — version publish dates not yet loaded, so Q2 cannot date the vulnerable version
+
+`introducing_version` returns the correct `introduced`/`fixed` bounds, but
+`introduced_published_at` comes back `NULL` on real data because only latest-version rows carry
+a `published_at`. Per-version dates live solely on the *full* packument (`time`), which the
+`fetch_packuments` stage retrieves — that stage exists and is wired, but has not been run.
+
+Also leaves `AFFECTED_BY.valid_from`/`valid_to` NULL, so the advisory side of the temporal
+story is currently untimed (the lockfile side, `RESOLVED_TO`, is fully timed and working).
+
+**Fix:** run `fetch_packuments` for the ~5k advisory-affected packages inside the coverage cap
+after the ranking completes, then backfill both columns. Bounded work — not all 25k.
+
 
 ### B5 — `rank_gap` does not discriminate among unranked candidates (quality limit, not a bug)
 
