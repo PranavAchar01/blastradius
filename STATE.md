@@ -278,11 +278,36 @@ Identical to the development tree. Lint/type/test status: ruff clean, ruff forma
    caught it immediately by naming the exact missing path.
 
 ## P7 — Submission
-- [ ] DEMO_SCRIPT.md — ≤3:00, ordered: problem, project, live demo, HydraDB usage
-- [ ] SUBMISSION.md — every Google Form field pre-written
-- [ ] Pre-submission checklist run item by item with evidence
+- [x] DEMO_SCRIPT.md — ≤3:00, ordered: problem, project, live demo, HydraDB usage
+- [x] SUBMISSION.md — every Google Form field pre-written
+- [x] Pre-submission checklist run item by item with evidence
 
-**GATE:** every checklist line checked with evidence.
+**P7 GATE: checklist run item by item.**
+
+| # | item | status | evidence |
+| --- | --- | --- | --- |
+| 1 | Form fields ready | ✅ | [SUBMISSION.md](SUBMISSION.md) — every field pre-written verbatim |
+| 2 | Repo licensed | ✅ | `LICENSE` line 1 = `MIT License` |
+| 3 | Repo public | ⏳ **human** | not yet pushed to GitHub — see "Remaining by hand" |
+| 4 | README clear | ✅ | problem, six questions w/ latencies, HydraDB role + what breaks without it, cold-clone setup, 7 named limits, attribution |
+| 5 | Setup works from a cold clone | ✅ | P6 gate: fresh `git clone` → `uv sync` → 37 tests pass → eval reproduces `precision=1.0000 recall=1.0000 (tp=1241 fp=0 fn=0)` |
+| 6 | Video ≤3 min | ✅ script | [DEMO_SCRIPT.md](DEMO_SCRIPT.md) **measured** 394 spoken words = 2:35 @152wpm, 2:48 @140wpm. First draft was 3:03 and was cut. |
+| 6b | Video recorded + accessible | ⏳ **human** | script + shot list ready; recording is a human step |
+| 7 | Deployed link works | ✅ | production verified: closure 8 matching npm-verified truth, warm p50 196ms, HydraDB panel 0.922 top score |
+| 8 | HydraDB usage explained | ✅ | README + SUBMISSION + [SCHEMA.md §0](SCHEMA.md); includes the measured case where the baseline *beats* the graph (Q2) |
+| 9 | All work dated Aug 12+ | ✅ | commits span 2026-08-14 → 2026-08-16; `git log` shows **0** commits before 2026-08-12 |
+| 10 | No secrets committed | ✅ | `git log -p --all \| grep -c <key>` → **0** occurrences across all history |
+
+```
+$ git log --format='%ad' --date=short | sort -u
+2026-08-14
+2026-08-15
+2026-08-16
+$ git log --format='%ad' --date=short | awk '$1 < "2026-08-12"' | wc -l
+0
+$ git log -p --all | grep -c "sk_live_..."
+0
+```
 
 ---
 
