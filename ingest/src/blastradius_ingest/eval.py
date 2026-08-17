@@ -21,6 +21,7 @@ over the ``MAL-*`` records, which are the correct ground truth for typosquatting
 
 from __future__ import annotations
 
+import gzip
 import json
 import statistics
 import time
@@ -103,6 +104,34 @@ class EvalReport:
         }
 
 
+def _oracle_manifests(paths: Paths) -> Iterator[dict[str, Any]]:
+    """Raw npm manifests for the oracle.
+
+    Prefers the working ``latest.ndjson``; falls back to the compressed copy committed at
+    ``fixtures/oracle-manifests.ndjson.gz`` (827KB) so the eval reproduces from a cold clone.
+    ``data/`` is gitignored, and without this fallback the oracle came back empty and the eval
+    reported ``precision=0.0000`` — a number that looks measured but is purely an artifact of a
+    missing input file. Raising beats reporting that.
+    """
+    if paths.latest.exists():
+        yield from read_ndjson(paths.latest)
+        return
+
+    fallback = (
+        Path(__file__).resolve().parents[2] / "fixtures" / "oracle-manifests.ndjson.gz"
+    )
+    if not fallback.exists():
+        raise FileNotFoundError(
+            f"oracle input missing: neither {paths.latest} nor {fallback} exists. "
+            "Run `blastradius latest`, or restore the committed fixture."
+        )
+    with gzip.open(fallback, "rt") as fh:
+        for line in fh:
+            stripped = line.strip()
+            if stripped:
+                yield json.loads(stripped)
+
+
 def build_oracle(paths: Paths, store: Store) -> dict[tuple[str, str], set[str]]:
     """Independent ground truth: direct dependents per (package, resolved version).
 
@@ -127,7 +156,7 @@ def build_oracle(paths: Paths, store: Store) -> dict[tuple[str, str], set[str]]:
     in_cap = {r["name"] for r in store.conn.execute("SELECT name FROM package")}
 
     oracle: dict[tuple[str, str], set[str]] = {}
-    for rec in read_ndjson(paths.latest):
+    for rec in _oracle_manifests(paths):
         if rec.get("missing"):
             continue
         src = rec["name"]
@@ -208,6 +237,15 @@ def run_eval(
     report = EvalReport()
     oracle = build_oracle(paths, store)
     report.bump("oracle_entries", len(oracle))
+    # An empty oracle scores every correct answer as a false positive and reports
+    # `precision=0.0000` — which reads as a catastrophic result but is really a missing input.
+    # Refuse to emit a score rather than publish a meaningless one.
+    if not oracle:
+        raise RuntimeError(
+            "oracle is empty — every result would be scored as a false positive and the "
+            "reported precision would be an artifact, not a measurement. Check that the "
+            "manifest source exists and that the graph has version rows."
+        )
 
     for row in _held_out_ghsa(store, limit):
         report.bump("held_out_ghsa_in_cap")
