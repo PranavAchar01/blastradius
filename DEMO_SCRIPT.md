@@ -1,122 +1,114 @@
 # blastradius — demo script
 
-**Measured 2:35 at 152 wpm. Hard ceiling 3:00.** Order is fixed by the packet:
-problem → project → live demo → where HydraDB is used and why it matters.
+Written for a viewer with no technical background. Every sentence is complete. There are no
+em dashes, no semicolons, no irony, no understatement, and no conditional phrasing. The
+delivery is continuous with no pauses.
 
-Word counts below are **counted, not estimated** — the snippet at the bottom re-measures after
-any edit. A first draft measured 465 words / 3:03, over the ceiling, and was cut to 394.
+Order is fixed by the packet: problem, then project, then live demo, then where HydraDB is
+used and why it matters.
 
-Screen actions are in **bold**; everything in `>` is spoken.
+**Spoken words: 431. At 150 words per minute this runs 2:52. The ceiling is 3:00.**
 
-**Before recording:** open the production URL, let the demo case load, and have
-`examples/acme-checkout.package-lock.json` ready to drag. Don't clear the fields — the console
-loads on `lodash@3.10.1` deliberately, so nothing is typed in the first 30 seconds.
+Every number and every result named below was verified live against the deployed console
+before this script was written. Nothing here is described from memory.
 
----
-
-## 1 · The problem — 70 words · 0:00–0:28
-
-> A maintainer's npm account gets taken over at nine in the morning. A malicious version ships.
-> It's yanked six minutes later.
->
-> In those six minutes you need to know: who transitively depends on the bad version, which of
-> *your* services installed it while it was live, and what else that maintainer publishes.
->
-> Today that's hours of grepping lockfiles. The incident is over before you know if you were in
-> it.
-
-## 2 · The project — 38 words · 0:28–0:43
-
-**Screen: the console, already loaded on lodash@3.10.1.**
-
-> This is blastradius. Every one of those is a *reachability* question over a graph that changes
-> with time — not a similarity question. So it's answered by traversal, across twenty-five
-> thousand npm packages and the complete OSV advisory corpus.
-
-## 3 · Live demo — 158 words · 0:43–1:46
-
-**Point at the verdict row.**
-
-> lodash 3.10.1. Blast radius: eight package-versions, two hops deep. Two and a half
-> milliseconds.
->
-> Here's what matters. Eight hundred and twenty-six packages here depend on lodash — only six
-> resolve to this compromised version. The rest are on 4.x and are genuinely fine. A search
-> index can't tell those apart. I hand-verified all six against npm's live registry.
-
-**Scroll to the graph. Hover an outer node.**
-
-> Centre is the compromised version, each ring is one hop. Hovering lights the path back to the
-> source with the semver range that made each edge true. The path is the proof — "you're
-> exposed" isn't actionable; "you're exposed *because* this range resolves here" is.
-
-**Drag the lockfile in. Click trace.**
-
-> My actual service: exposed twice. It pins the bad version directly, and inherits it through
-> jscs at depth one.
-
-**Drag the scrubber.**
-
-> And time is first-class. The affected set is recomputed by interval overlap as I drag. This
-> was vulnerable for five years — install it then, revert later, you still show exposed. A
-> present-tense view misses that.
-
-## 4 · HydraDB, and why it matters — 99 words · 1:46–2:25
-
-**Scroll to §9. Type "malicious postinstall that steals credentials". Run.**
-
-> Traversal can't do everything. HydraDB holds the advisory corpus as prose — and that query
-> names no package at all.
->
-> Top hit: the real eslint-config-prettier compromise. 0.91, half a second. No SQL predicate
-> finds that, because none of those words appear in the package name.
->
-> The split is deliberate, and I measured it both ways. Same six questions: semantic search
-> returns *zero* of eight correct dependents, and zero of forty-six typosquats. But it *beats*
-> the graph on "which version introduced this" — because that answer is written down in prose.
->
-> Reachability is a graph problem. Meaning is a HydraDB problem.
-
-## 5 · Close — 29 words · 2:25–2:35
-
-> Precision and recall are both 1.0 on twelve thousand nine hundred held-out advisories, scored
-> against ground truth computed independently of the graph. Every number reproduces from a
-> clone.
+Lines beginning with `SCREEN` are actions, not narration.
 
 ---
 
-## Measured budget
+## Before recording
 
-| section | words | running |
-| --- | ---: | ---: |
-| 1 problem | 70 | 0:28 |
-| 2 project | 38 | 0:43 |
-| 3 live demo | 158 | 1:46 |
-| 4 HydraDB | 99 | 2:25 |
-| 5 close | 29 | 2:35 |
-| **total** | **394** | **2:35** |
+Open the production URL and let it finish loading. The console opens on `lodash@3.10.1` on
+purpose, so the first forty seconds require no typing. Have
+`examples/acme-checkout.package-lock.json` visible in a folder, ready to drag onto the page.
 
-At 152 wpm: **2:35**. At a slow 140 wpm: **2:48**. At a brisk 165: **2:23**. Under the ceiling
-across the whole plausible range, with room for the six screen actions.
+---
 
-## If it still runs long, cut in this order
+## 1. The problem (0:00 to 0:33)
 
-1. The close (0:10) — the numbers are on screen and in the README.
-2. "and what else that maintainer publishes" in §1 (0:03).
-3. The Q2 concession in §4 (0:11). **Cut this last.** Volunteering the one case where the
-   baseline beats us is what makes the rest of the comparison believable.
+`SCREEN` Title card, or the console sitting still.
 
-**Never cut:** the 826-vs-6 contrast, the lockfile drop, or the scrubber. Those three are the
-whole argument.
+> Almost every app you use is built from thousands of small pieces of free code written by
+> strangers. One piece can sit inside millions of projects.
+>
+> Sometimes an attacker takes over one of those pieces and publishes a poisoned version. That
+> version often stays online for a few minutes before somebody removes it.
+>
+> During those minutes every software team needs to know whether their own product just
+> installed the poison. Finding that answer today takes hours of manual searching, and the
+> emergency ends long before anybody finishes.
 
-## Re-measuring after an edit
+## 2. The project (0:33 to 0:47)
+
+`SCREEN` The console, already loaded on lodash 3.10.1.
+
+> This is blastradius. You give it the name of a poisoned package. It shows you every project
+> that would be affected, how far the damage travels, and the exact moment the danger began.
+
+## 3. The live demo (0:47 to 2:17)
+
+`SCREEN` Point at the verdict row.
+
+> Here it is on a real case. This package is lodash, one of the most widely installed pieces of
+> code in the world. This version carries five real security advisories.
+>
+> The big number is eight. Eight real projects depend on this exact version, and the console
+> found them in under one millisecond.
+
+`SCREEN` Scroll to the diagram. Hover an outer node so its chain lights up in red.
+
+> This picture is the proof. The poisoned package sits in the middle. Every ring outward is one
+> more step along the chain of who depends on whom. When I hover over a project, the console
+> lights up the exact route back to the poison. A responder sees why they are affected instead
+> of only a number.
+
+`SCREEN` Scroll to the slider. Drag slowly left to right, resting inside the red band.
+
+> Now I am dragging through time. Every position on this bar is a real date. At the start of
+> 2015 this package was clean. The banner turns red as the poisoned version ships. It goes
+> quiet again in the summer of 2020 when the fix lands. This package looks perfectly safe
+> today, and it was wide open for more than five years.
+
+`SCREEN` Drag `acme-checkout.package-lock.json` onto the drop zone. Click trace.
+
+> Finally I will drop in a real installation file from acme checkout. It records exactly which
+> versions that team installed. The console marks which of their services touched the poisoned
+> code and how deep it runs.
+
+## 4. Where HydraDB is used and why it matters (2:17 to 2:51)
+
+`SCREEN` Scroll to the search box at the bottom. Run the query already in the field.
+
+> HydraDB powers the half of this product that understands meaning. Here I describe an attack
+> in plain English without naming a single package.
+>
+> The top result hijacked environment variables out of a package called proxy dot js. Further
+> down is crossenv, one of the most famous supply chain attacks ever run against this ecosystem.
+>
+> Not one of those package names contains a word that I typed. Searching by name finds nothing,
+> and HydraDB finds them all in half a second.
+>
+> The graph tells you who is affected. HydraDB tells you what happened. Real incident response
+> needs both, and that is why this product has both.
+
+---
+
+## What was verified live before recording
+
+| Beat | Claim | Verified result |
+| --- | --- | --- |
+| 3 | five advisories, blast radius eight | `blast radius=8, max depth=2, advisories=5`, page total 26.3 ms |
+| 3 | found in under one millisecond | `0.364 ms` on the verdict row |
+| 3 | clean 2015, red mid window, quiet after 2020 | scrubber: `2015-01-23` no window, `2016-06-23` and `2019-10-12` VULNERABLE, `2023-04-26` no window |
+| 3 | lockfile marks their own services | `your services 0 → 2`, chain `jscs@3.0.7 -> lodash@3.10.1` |
+| 4 | top result hijacked environment variables | `GHSA-qj73-v688-wqxf`, proxy.js, score 0.922 |
+| 4 | crossenv appears | `GHSA-c2m4-w5hm-vqjw`, "crossenv is malware" |
+| 4 | about half a second | server 455 ms, round trip 514 ms |
+
+## Re-measuring after any edit
 
 ```bash
-python3 - <<'EOF'
-import re, pathlib
-body = pathlib.Path('DEMO_SCRIPT.md').read_text().split('## Measured budget')[0]
-spoken = ' '.join(l[1:] for l in body.splitlines() if l.startswith('>'))
-w = len(re.findall(r"[\w'’-]+", spoken))
-print(f"{w} words -> " + " · ".join(f"{r}wpm {int(w/r*60)//60}:{int(w/r*60)%60:02d}" for r in (140,152,165)))
-EOF
+awk '/^> /{gsub(/^> /,""); print}' DEMO_SCRIPT.md | wc -w
 ```
+
+Divide by 150 for minutes. Anything over 445 words breaks the three minute ceiling.
