@@ -238,9 +238,9 @@ Two deployment defects found and fixed by testing production rather than assumin
    failure instead of raising a bare SQLite error.
 
 ## P6 — Harden
-- [ ] ruff + mypy clean on `ingest/`; tsc strict + lint clean on `web/`; tests pass; build succeeds
-- [ ] Re-run full eval against production
-- [ ] README: what/problem/cold-clone setup/HydraDB usage/deps/attribution/license
+- [x] ruff + mypy clean on `ingest/`; tsc strict + lint clean on `web/`; tests pass; build succeeds
+- [x] Re-run full eval against production
+- [x] README: what/problem/cold-clone setup/HydraDB usage/deps/attribution/license
 
 **P6 GATE: PASSED.** `git clone` to a fresh directory, then the README's commands verbatim:
 
