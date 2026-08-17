@@ -28,6 +28,9 @@ out/
 checkpoints/
 *.ndjson
 *.ndjson.gz
+# ...except the committed oracle input, which is what makes the eval reproducible from a
+# cold clone. 827KB of manifests, reduced to only the fields the oracle reads.
+!ingest/fixtures/oracle-manifests.ndjson.gz
 
 # os / editor
 .DS_Store
