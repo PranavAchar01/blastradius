@@ -83,13 +83,86 @@ packages is reported in §3.
 
 ---
 
-## 3. Results — **pending**
+## 3. Results
 
-Not yet run. Requires the completed ingest (P2 gate) and the query engine (P3).
+Reproduce with one command (see §5): `uv run blastradius eval`.
 
-Will contain, per question Q1–Q6: precision, recall, p50/p95 latency, cost per query, the
-number of held-out advisories scored, and the number excluded for falling outside the coverage
-cap.
+### 3a. Closure accuracy — Q1 / Q6
+
+**1,404 held-out advisories scored.** Ground truth is an independent recomputation from the raw
+npm manifests, using separate semver logic that never touches the graph-build code.
+
+| metric | value |
+| --- | ---: |
+| micro precision | **1.0000** |
+| micro recall | **1.0000** |
+| F1 | **1.0000** |
+| true positives | 1,241 |
+| false positives | **0** |
+| false negatives | **0** |
+
+**Read this number correctly.** It says the graph agrees exactly with an independent
+implementation *over the same universe* — the 25,754 packages inside the coverage cap. It does
+**not** say the graph finds every dependent on npm. Any dependent outside the cap is invisible
+to the closure by construction, and that is a coverage limitation (§2), not a retrieval score.
+npm has ~4.29M packages; this graph covers 25,754 of them.
+
+**A correction worth recording.** The first full run reported recall 0.9710 with 37 false
+negatives. Inspecting them showed every one was a package *outside* the cap: `latest.ndjson` is
+append-only and had accumulated 505 packages from earlier runs at smaller caps, so the oracle
+was crediting dependents the graph had correctly never ingested. The bug was in the eval, not
+the system — the graph was never modified. The oracle now restricts to in-cap sources, which is
+the only way the comparison means anything. Both numbers are reported here rather than only the
+better one, and every remaining disagreement is dumped to `data/eval_results.json` under
+`disagreements` so the claim stays falsifiable.
+
+Excluded and reported rather than silently dropped:
+
+| counter | value | why |
+| --- | ---: | --- |
+| `held_out_ghsa_in_cap` | 2,224 | held-out GHSA advisories naming an in-cap package |
+| `skipped_no_known_affected_version` | 820 | affected window names no version we hold — a coverage limit, not a miss |
+| scored | 1,404 | the remainder |
+
+### 3b. Latency — all six questions, on the full graph
+
+Measured over the same run; n is the number of timed invocations.
+
+| question | n | p50 | p95 |
+| --- | ---: | ---: | ---: |
+| Q1 blast radius | 1,404 | **0.006 ms** | 0.214 ms |
+| Q2 introducing version | 4,212 | 0.007 ms | 0.168 ms |
+| Q3 exposed during (temporal) | 4,212 | **0.003 ms** | 0.004 ms |
+| Q4 shared maintainer | 4,212 | 0.035 ms | 0.463 ms |
+| Q5 typosquats | 4,212 | 9.842 ms | 11.508 ms |
+| Q6 rollup | 4,212 | 0.013 ms | 0.033 ms |
+
+Q5 is three orders of magnitude slower than the rest because it scans 212,932 SIMILAR_NAME
+edges rather than following an index; it is still comfortably inside the sub-second budget.
+
+### 3c. Typosquat recall — Q5, against held-out `MAL-*` records
+
+| metric | value |
+| --- | ---: |
+| held-out malicious packages | 10,163 |
+| flagged by SIMILAR_NAME | 207 |
+| recall | **2.04%** |
+| p50 / p95 lookup | 0.002 ms / 0.004 ms |
+
+**This number is low and it is reported as-is.** SIMILAR_NAME only relates a candidate to the
+25,000 ranked packages, so a malicious package that squats something *outside* the cap — or
+that is not a name-similarity attack at all (a plausible-sounding new name, a compromised
+legitimate package, dependency confusion) — cannot be flagged by construction. The 2.04% is
+therefore a measure of how much of the malicious corpus is "typosquat of a popular package",
+not a measure of detector quality on that subset. Raising it would mean widening the cap, not
+tuning the matcher. See STATE.md B5.
+
+### 3d. Cost per query
+
+**$0.** Every query in §3a–§3c runs against the local SQLite graph with no network call and no
+API spend. The HydraDB semantic layer (§3b above) is the only networked path, at ~735 ms mean
+server-side and no per-query charge on the hackathon instance. Ingest cost is in STATE.md; it
+is also $0, bounded by rate limits rather than billing.
 
 ## 3b. HydraDB semantic layer — measured
 

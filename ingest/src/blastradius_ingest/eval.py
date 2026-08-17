@@ -116,11 +116,23 @@ def build_oracle(paths: Paths, store: Store) -> dict[tuple[str, str], set[str]]:
     for row in store.conn.execute("SELECT pkg, version FROM version"):
         versions.setdefault(row["pkg"], []).append(row["version"])
 
+    # The oracle must model the *same universe* as the graph. `latest.ndjson` is append-only
+    # and accumulates packages from earlier runs at smaller caps — 26,259 records against a
+    # frozen 25,000-package ranking — so iterating it wholesale credits dependents that are
+    # outside the coverage cap and were correctly never ingested. Scoring against that
+    # inflated set produced 37 phantom false negatives (recall 0.971) that were an artifact
+    # of the eval, not a defect in the graph. Restricting to in-cap sources is what makes
+    # the comparison meaningful; out-of-cap dependents are a documented coverage limit,
+    # reported in EVAL.md rather than charged against retrieval.
+    in_cap = {r["name"] for r in store.conn.execute("SELECT name FROM package")}
+
     oracle: dict[tuple[str, str], set[str]] = {}
     for rec in read_ndjson(paths.latest):
         if rec.get("missing"):
             continue
         src = rec["name"]
+        if src not in in_cap:
+            continue
         for field_name in ("deps", "peer", "optional"):
             for target, rng in (rec.get(field_name) or {}).items():
                 known = versions.get(target)
@@ -278,12 +290,30 @@ def score_typosquats(store: Store, *, limit: int | None = None) -> dict[str, Any
     }
 
 
-def render_json(report: EvalReport, typo: dict[str, Any], out: Path) -> None:
+def render_json(
+    report: EvalReport, typo: dict[str, Any], out: Path, *, fn_samples: int = 25
+) -> None:
+    # Every disagreement with the oracle is dumped, not just counted. A recall number with
+    # no way to inspect the misses is unfalsifiable, and these are the rows that tell you
+    # whether the gap is a bug or a coverage boundary.
+    misses = [
+        {
+            "osv_id": c.osv_id,
+            "pkg": c.pkg,
+            "version": c.version,
+            "missed": sorted(c.expected - c.got),
+            "spurious": sorted(c.got - c.expected),
+        }
+        for c in report.cases
+        if c.false_negatives or c.false_positives
+    ]
     payload = {
         "counters": report.counters,
         "closure": report.micro_prf(),
         "latency": {q: report.percentiles(q) for q in sorted(report.latencies)},
         "typosquats": typo,
         "cases_scored": len(report.cases),
+        "cases_with_disagreement": len(misses),
+        "disagreements": misses[:fn_samples],
     }
     out.write_text(json.dumps(payload, indent=2))
