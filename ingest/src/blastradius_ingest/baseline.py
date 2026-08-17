@@ -229,6 +229,8 @@ def run_baseline(
 
 
 def render_baseline(cases: list[BaselineCase], out: Path) -> None:
+    # Same cold-clone hazard as the eval: `data/` is gitignored and may not exist.
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(
             {

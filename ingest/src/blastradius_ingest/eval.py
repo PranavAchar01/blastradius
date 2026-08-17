@@ -316,4 +316,7 @@ def render_json(
         "cases_with_disagreement": len(misses),
         "disagreements": misses[:fn_samples],
     }
+    # `data/` is gitignored, so on a cold clone it does not exist yet and the eval would
+    # score everything correctly and then die writing its own results.
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2))
