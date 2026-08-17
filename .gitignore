@@ -43,3 +43,10 @@ checkpoints/
 # SQLite sidecars are runtime state, never artifacts
 *.db-wal
 *.db-shm
+
+# recording work artifacts (the mp4 itself is committed as the deliverable)
+recording/node_modules/
+recording/out/
+recording/frames/
+recording/package-lock.json
+recording/package.json
