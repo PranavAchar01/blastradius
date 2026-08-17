@@ -9,6 +9,7 @@
  * the frontier is expanded in chunks, because SQLite caps expression-tree depth at 1000 and
  * lodash alone has 728 direct dependents.
  */
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
@@ -17,10 +18,33 @@ const FRONTIER_CHUNK = 250;
 
 let cached: DatabaseSync | null = null;
 
+/**
+ * Locate the graph across local dev and the serverless bundle.
+ *
+ * `process.cwd()` is the project root in dev but `/var/task` in a Vercel function, and the
+ * traced artifact can land beside the bundled route rather than at the root. Trying the known
+ * candidates — and reporting all of them when none exists — turns a bare
+ * "unable to open database file" into something diagnosable.
+ */
+function locate(): string {
+  const candidates = [
+    path.join(process.cwd(), "data", "blastradius-web.db"),
+    path.join(process.cwd(), "web", "data", "blastradius-web.db"),
+    path.join("/var/task", "data", "blastradius-web.db"),
+    path.join(__dirname, "data", "blastradius-web.db"),
+    path.join(__dirname, "..", "data", "blastradius-web.db"),
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  throw new Error(
+    `graph database not found. cwd=${process.cwd()} — looked in:\n  ${candidates.join("\n  ")}`,
+  );
+}
+
 export function db(): DatabaseSync {
   if (!cached) {
-    const file = path.join(process.cwd(), "data", "blastradius-web.db");
-    cached = new DatabaseSync(file, { readOnly: true });
+    cached = new DatabaseSync(locate(), { readOnly: true });
   }
   return cached;
 }

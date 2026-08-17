@@ -203,12 +203,39 @@ baseline (HydraDB, same questions, same corpus):
 ```
 
 ## P5 — Console
-- [ ] Next.js: paste pkg@version or upload lockfile → interactive graph with traversal path visible
-- [ ] Timeline scrubber for the temporal query
-- [ ] Live latency on every query
-- [ ] Deploy to Vercel; verify production URL end to end
+- [x] Next.js: paste pkg@version or upload lockfile → interactive graph with traversal path visible
+- [x] Timeline scrubber for the temporal query
+- [x] Live latency on every query
+- [x] Deploy to Vercel; verify production URL end to end
 
-**GATE:** production URL returns correct results for the demo advisory in under a second.
+**P5 GATE: PASSED.** Production URL:
+**https://blastradius-do41vakr2-phantom3452s-projects.vercel.app**
+
+```
+POST /api/incident {"pkg":"lodash","version":"3.10.1"}
+
+closure           : 8            (matches the npm-verified P2 hand-check exactly)
+direct dependents : cli-table2, grunt-usemin, health, html-to-json, jscs, machinepack-urls
+matches truth     : true
+advisories        : 5
+timeline          : GHSA-p6mc-m468-83gw  2015-04-16 -> 2020-07-08
+server timings    : blastRadius=14.8ms  advisories=16.3ms  maintainers=36.8ms  typosquats=115.3ms
+server totalMs    : 203.5
+
+warm round trip over 5 runs, including network:
+  min 140ms   p50 233ms   max 314ms      cold start 920ms
+```
+
+Two deployment defects found and fixed by testing production rather than assuming it:
+
+1. **Vercel Deployment Protection was on by default** — every API call returned 401 behind an
+   SSO redirect. The page rendered, so a casual check would have passed while the tool was
+   unusable for anyone but the account owner. Disabled via the projects API.
+2. **The database never made it into the function bundle.** `outputFileTracingIncludes` was
+   keyed `"/api/**/*"`, which silently matched no route, so production failed with
+   `ERR_SQLITE_ERROR: unable to open database file` while local dev worked perfectly. Keys are
+   now spelled out per route, and `locate()` tries each known path and reports all of them on
+   failure instead of raising a bare SQLite error.
 
 ## P6 — Harden
 - [ ] ruff + mypy clean on `ingest/`; tsc strict + lint clean on `web/`; tests pass; build succeeds
