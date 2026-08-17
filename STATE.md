@@ -209,7 +209,7 @@ baseline (HydraDB, same questions, same corpus):
 - [x] Deploy to Vercel; verify production URL end to end
 
 **P5 GATE: PASSED.** Production URL:
-**https://blastradius-do41vakr2-phantom3452s-projects.vercel.app**
+**https://blastradius-c8mvz5mw9-phantom3452s-projects.vercel.app**
 
 ```
 POST /api/incident {"pkg":"lodash","version":"3.10.1"}

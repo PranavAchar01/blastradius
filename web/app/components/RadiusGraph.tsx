@@ -62,14 +62,21 @@ export default function RadiusGraph({ subject, nodes, edges, maxNodes = 140 }: P
     }
     const depths = [...byDepth.keys()].sort((a, b) => a - b);
     const maxDepth = depths.length ? Math.max(...depths) : 1;
-    const step = Math.min(120, (Math.min(W, H) / 2 - 60) / Math.max(1, maxDepth));
+    // Reserve LABEL_ROOM outside the widest ring: labels sit above their node, and without
+    // this the outermost ring lands at y=8 and its names are clipped off the viewBox.
+    const BASE = 52;
+    const LABEL_ROOM = 34;
+    const step = Math.min(
+      120,
+      (Math.min(W, H) / 2 - BASE - LABEL_ROOM) / Math.max(1, maxDepth),
+    );
 
     const out: Placed[] = [
       { id: centre, pkg: subject.pkg, version: subject.version, depth: 0, exposed: true, x: W / 2, y: H / 2 },
     ];
     for (const d of depths) {
       const ring = byDepth.get(d)!;
-      const r = step * d + 52;
+      const r = step * d + BASE;
       // Offset each ring so labels on adjacent rings do not collide.
       const phase = (d % 2) * (Math.PI / ring.length);
       ring.forEach((n, i) => {
@@ -83,7 +90,7 @@ export default function RadiusGraph({ subject, nodes, edges, maxNodes = 140 }: P
       byId: map,
       shown: keep.length,
       hidden: Math.max(0, nodes.length - keep.length),
-      rings: depths.map((d) => step * d + 52),
+      rings: depths.map((d) => step * d + BASE),
     };
   }, [nodes, subject, maxNodes]);
 
