@@ -485,6 +485,28 @@ $ git log -p --all | grep -c "sk_live_..."
 
 ## Blockers
 
+**No open blockers.** Every item below reached a terminal state: fixed in code, or converted
+into a coverage limitation that is stated in the [README](README.md) and reported alongside
+every affected number in [EVAL.md](EVAL.md). Nothing is stubbed, and nothing is presented as
+working that isn't. Full detail is preserved in the archive that follows.
+
+| id | what it was | outcome |
+| --- | --- | --- |
+| B1 | HydraDB has no typed-edge store and no traversal API | **Resolved by design.** Hybrid split: exact closure in the graph, semantics in HydraDB. Measured both ways in EVAL.md §4. |
+| B2 | `app_knowledge` ingest accepts 202 then never indexes | **Worked around.** All writes use the `documents` path, which is verified end to end. No capability lost. |
+| B3 | "full npm" not reachable at this ingest cost | **Converted to a documented cap.** Top 25,000 by downloads; advisory corpus complete and uncapped; all 4,291,086 names enumerated. README limit #1–2. |
+| B4 | scoped packages can't be bulk-priced (~22h) | **Converted to a documented limit.** Unscoped 2,667,953 ranked exhaustively. README limit #2. |
+| B5 | `rank_gap` is binary for unranked candidates | **Converted to honest reporting.** SIMILAR_NAME is reported as a candidate generator, recall not precision. README limit #5, EVAL.md §1. |
+| B6 | version publish dates missing, so Q2 couldn't date a version | **Fixed.** Packument pass; 1,818 AFFECTED_BY edges carry real intervals. |
+| B7 | blast radius only answered for a package's *latest* version | **Fixed.** Resolution against all known versions; `blast_radius(acorn@7.4.1)` went 0 → 3. 7 regression tests. |
+
+Two items remain that are **not** blockers on the build — they are human actions, listed in the
+P7 gate table and in the final report: push the repo public, and record the video.
+
+---
+
+## Blocker archive
+
 ### B6 + B7 — RESOLVED (Aug 15, iter 6)
 
 Both fixed by the packument pass plus `resolve_all_versions`, which resolves declared ranges
