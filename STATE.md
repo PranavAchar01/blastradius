@@ -242,7 +242,40 @@ Two deployment defects found and fixed by testing production rather than assumin
 - [ ] Re-run full eval against production
 - [ ] README: what/problem/cold-clone setup/HydraDB usage/deps/attribution/license
 
-**GATE:** cold clone + README instructions reproduce the eval numbers.
+**P6 GATE: PASSED.** `git clone` to a fresh directory, then the README's commands verbatim:
+
+```
+$ uv sync && uv run pytest -q
+37 passed in 0.16s
+
+$ uv run blastradius --db ../web/data/blastradius-web.db eval
+[eval] 1404 closure cases scored in 87s
+[eval] counters: {'oracle_entries': 12034, 'held_out_ghsa_in_cap': 2224,
+                  'skipped_no_known_affected_version': 820}
+[eval] closure micro precision=1.0000 recall=1.0000 f1=1.0000 (tp=1241 fp=0 fn=0)
+[eval] Q1_blast_radius   p50=0.006ms p95=0.206ms
+[eval] Q3_exposed_during p50=0.002ms p95=0.003ms
+[eval] Q5_typosquats     p50=6.574ms p95=6.923ms
+[eval] Q6_rollup         p50=0.014ms p95=0.030ms
+```
+
+Identical to the development tree. Lint/type/test status: ruff clean, ruff format clean
+(17 files), mypy clean (16 files), 37 tests pass, `tsc --noEmit` clean, eslint clean,
+`pnpm build` succeeds.
+
+**Three cold-clone defects the gate caught** — all of which passed in the dev tree:
+
+1. `data/` is gitignored, so a fresh clone has no such directory. The eval scored all 1,404
+   cases correctly and then died with `FileNotFoundError` writing its own results.
+2. **The reproducibility bug that mattered.** `build_oracle` reads `data/latest.ndjson`, also
+   gitignored — so the oracle came back **empty** and all 1,241 correct results were scored as
+   false positives: `precision=0.0000 recall=1.0000 (tp=0 fp=1241)`. The graph was perfect and
+   the eval said it had failed completely. Fixed by shipping the oracle input compressed
+   (827KB, from a 7.5MB source) **and** by making `run_eval` raise rather than emit a score
+   from an empty oracle — a number that reads as catastrophic while actually being a missing
+   file is worse than no number.
+3. The fixture itself was matched by `*.ndjson.gz` and silently never committed. The new guard
+   caught it immediately by naming the exact missing path.
 
 ## P7 — Submission
 - [ ] DEMO_SCRIPT.md — ≤3:00, ordered: problem, project, live demo, HydraDB usage
