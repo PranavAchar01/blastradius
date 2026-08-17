@@ -337,6 +337,16 @@ the distinction a similarity index collapses and the reason B7 mattered.
   separate semver logic that never touches the build code — produced an exact set match.
   826 packages in the cap declare lodash; only 6 resolve to 3.10.1. That gap between 826 and 6
   is the whole argument for the graph.
+- **Aug 15, iter 10** — P4 eval harness written. The framing matters and is stated in the
+  module docstring: the holdout does **not** test prediction (nothing predicts an undisclosed
+  vulnerability) — it tests whether a graph built entirely from pre-cutoff data answers the six
+  questions correctly the moment a new advisory lands. Ground truth for the closure questions
+  is an *independent* recomputation from raw npm manifests with its own semver logic, so the
+  graph is never scored against itself. First validation run over 25 held-out advisories:
+  micro precision **1.0000**, recall **1.0000** (tp=9, fp=0, fn=0), Q1 p50 0.039ms,
+  Q6 p50 0.030ms, Q5 p50 7.5ms. Small sample — tp=9 — so the full run is what counts.
+  1 case was excluded because the affected window names no version we hold; that is counted
+  in `skipped_no_known_affected_version` and reported, not silently dropped.
 
 ## Blockers
 

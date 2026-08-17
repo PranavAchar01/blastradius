@@ -28,6 +28,7 @@ from blastradius_ingest.build import (
     resolve_all_versions,
     resolve_latest_versions,
 )
+from blastradius_ingest.eval import render_json, run_eval, score_typosquats
 from blastradius_ingest.hydra import HydraClient, ingest_advisories
 from blastradius_ingest.osv import HOLDOUT_CUTOFF, download_osv, load_advisories
 from blastradius_ingest.registry import Paths, RegistryClient, iter_names, read_ndjson
@@ -229,6 +230,36 @@ def cmd_hydra_query(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Score the held-out advisories and write machine-readable results."""
+    paths = _paths(args)
+    t0 = time.monotonic()
+    with Store(args.db) as store:
+        report = run_eval(store, paths, limit=args.limit)
+        typo = score_typosquats(store, limit=args.typo_limit)
+        out = paths.root / "eval_results.json"
+        render_json(report, typo, out)
+
+    prf = report.micro_prf()
+    print(
+        f"[eval] {len(report.cases)} closure cases scored in {time.monotonic() - t0:.0f}s"
+    )
+    print(f"[eval] counters: {report.counters}")
+    print(
+        f"[eval] closure micro precision={prf['precision']:.4f} "
+        f"recall={prf['recall']:.4f} f1={prf['f1']:.4f} "
+        f"(tp={prf['tp']} fp={prf['fp']} fn={prf['fn']})"
+    )
+    for q in sorted(report.latencies):
+        p = report.percentiles(q)
+        print(
+            f"[eval] {q:24} n={int(p['n']):5} p50={p['p50']:7.3f}ms p95={p['p95']:8.3f}ms"
+        )
+    print(f"[eval] typosquats: {typo}")
+    print(f"[eval] wrote {out}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     paths = _paths(args)
     n_names = sum(1 for _ in iter_names(paths.names))
@@ -301,6 +332,11 @@ def build_parser() -> argparse.ArgumentParser:
     hq.add_argument("--mode", choices=("fast", "thinking"), default="fast")
     hq.add_argument("--max-results", type=int, default=10)
     hq.set_defaults(func=cmd_hydra_query)
+
+    ev = sub.add_parser("eval", help="score the held-out advisories")
+    ev.add_argument("--limit", type=int, default=None, help="cap closure cases scored")
+    ev.add_argument("--typo-limit", type=int, default=None)
+    ev.set_defaults(func=cmd_eval)
 
     sim = sub.add_parser("similar", help="build SIMILAR_NAME typosquat edges")
     sim.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
