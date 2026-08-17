@@ -39,6 +39,10 @@ MAX_DEPTH = (
     12  # npm dependency chains are deep but not unbounded; guards against cycles
 )
 
+# SQLite caps expression-tree depth at 1000, and one OR-clause per frontier node hits that
+# ceiling on wide frontiers (lodash has 728 direct dependents). 250 leaves generous headroom.
+FRONTIER_CHUNK = 250
+
 
 @dataclass(slots=True)
 class Answer:
@@ -146,18 +150,29 @@ def blast_radius(
 
 
 def _frontier_query(store: Store, frontier: Sequence[tuple[str, str]]) -> list[Any]:
-    """One statement per BFS level, with the whole frontier bound at once."""
+    """Expand one BFS level, batching the frontier across as few statements as possible.
+
+    The frontier is bound in chunks rather than as one giant disjunction: SQLite caps
+    expression-tree depth at 1000, and a package like ``lodash`` has 728 direct dependents, so
+    a single ``OR``-per-node statement raises ``Expression tree is too large`` exactly on the
+    widest — and most important — blast radii. Chunking keeps the statement count proportional
+    to frontier size while staying well inside the limit.
+    """
     if not frontier:
         return []
-    clauses = " OR ".join("(d.dst_pkg = ? AND d.resolved = ?)" for _ in frontier)
-    params: list[str] = []
-    for p, v in frontier:
-        params.extend((p, v))
-    sql = (
-        "SELECT d.src_pkg, d.src_version, d.dst_pkg, d.resolved, d.dep_type, d.range "
-        f"FROM depends_on d WHERE {clauses}"
-    )
-    return list(store.conn.execute(sql, params))
+    out: list[Any] = []
+    for i in range(0, len(frontier), FRONTIER_CHUNK):
+        chunk = frontier[i : i + FRONTIER_CHUNK]
+        clauses = " OR ".join("(d.dst_pkg = ? AND d.resolved = ?)" for _ in chunk)
+        params: list[str] = []
+        for p, v in chunk:
+            params.extend((p, v))
+        sql = (
+            "SELECT d.src_pkg, d.src_version, d.dst_pkg, d.resolved, d.dep_type, d.range "
+            f"FROM depends_on d WHERE {clauses}"
+        )
+        out.extend(store.conn.execute(sql, params))
+    return out
 
 
 # --------------------------------------------------------------------------- Q2

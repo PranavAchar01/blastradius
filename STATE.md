@@ -382,6 +382,21 @@ baseline (HydraDB, same questions, same corpus):
   Q6 p50 0.030ms, Q5 p50 7.5ms. Small sample — tp=9 — so the full run is what counts.
   1 case was excluded because the affected window names no version we hold; that is counted
   in `skipped_no_known_affected_version` and reported, not silently dropped.
+- **Aug 15, iter 11** — Building the deployable DB artifact caught a **crash in the headline
+  query**. `blast_radius` bound one `OR` clause per frontier node, and SQLite caps expression
+  trees at depth 1000 — so any package with >1000 direct dependents raised
+  `Expression tree is too large`. That is precisely the largest and most important blast radii
+  (lodash alone has 728 direct dependents, and the second BFS level compounds it). The eval
+  never hit it because held-out advisories all have small closures, and no unit test had a
+  wide frontier. Fixed by chunking the frontier at 250 per statement; regression test added
+  with a 1,200-dependent fixture. Found by the parity check, not by the test suite — the same
+  lesson as B7.
+- **Aug 15, iter 11** — Console artifact: 152.5MB → **74.6MB**, under GitHub's 100MB file
+  limit, by collapsing 219,676 `MAL-*` advisory records (which the console only needs one bit
+  from — "is this package flagged malicious?") into a 219,675-row `malicious_package` table,
+  and dropping advisory `details` prose, which lives in HydraDB and is read from there.
+  Parity is *proved*, not asserted: the real query engine runs against both files over the 25
+  busiest subjects and full result sets are compared — `IDENTICAL`.
 
 ## Blockers
 

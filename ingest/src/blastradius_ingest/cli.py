@@ -35,6 +35,7 @@ from blastradius_ingest.osv import HOLDOUT_CUTOFF, download_osv, load_advisories
 from blastradius_ingest.registry import Paths, RegistryClient, iter_names, read_ndjson
 from blastradius_ingest.similar import build_similar_names
 from blastradius_ingest.store import Store
+from blastradius_ingest.webdb import build_web_db, verify_parity
 
 DEFAULT_DATA = Path(__file__).resolve().parents[3] / "data"
 DEFAULT_DB = DEFAULT_DATA / "blastradius.db"
@@ -285,6 +286,39 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_webdb(args: argparse.Namespace) -> int:
+    """Build the pruned SQLite artifact the console ships with, and prove parity."""
+    src = Path(args.db)
+    dest = Path(args.out)
+    stats = build_web_db(src, dest)
+    print(
+        f"[webdb] {stats['src_mb']} MB -> {stats['dest_mb']} MB in {stats['seconds']}s"
+    )
+    for k, v in stats["counts"].items():
+        print(f"  {k:20} {v:>9,}")
+
+    with Store(src) as store:
+        subjects = [
+            (r["dst_pkg"], r["resolved"])
+            for r in store.conn.execute(
+                "SELECT dst_pkg, resolved, COUNT(*) n FROM depends_on "
+                "WHERE resolved IS NOT NULL GROUP BY dst_pkg, resolved "
+                "ORDER BY n DESC LIMIT ?",
+                (args.parity_samples,),
+            )
+        ]
+    result = verify_parity(src, dest, subjects)
+    print(
+        f"[webdb] parity over {result['subjects_checked']} busiest subjects: "
+        f"{'IDENTICAL' if result['identical'] else 'MISMATCH'}"
+    )
+    if not result["identical"]:
+        for m in result["mismatches"][:5]:
+            print(f"  {m}")
+        return 1
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     paths = _paths(args)
     n_names = sum(1 for _ in iter_names(paths.names))
@@ -365,6 +399,13 @@ def build_parser() -> argparse.ArgumentParser:
     bl.add_argument("--version", default="3.10.1")
     bl.add_argument("--osv-id", dest="osv_id", default="GHSA-35jh-r3h4-6jhm")
     bl.set_defaults(func=cmd_baseline)
+
+    wd = sub.add_parser(
+        "webdb", help="build the pruned SQLite artifact the console ships"
+    )
+    wd.add_argument("--out", default=str(Path("web") / "data" / "blastradius-web.db"))
+    wd.add_argument("--parity-samples", type=int, default=25)
+    wd.set_defaults(func=cmd_webdb)
 
     ev = sub.add_parser("eval", help="score the held-out advisories")
     ev.add_argument("--limit", type=int, default=None, help="cap closure cases scored")

@@ -231,6 +231,48 @@ def test_q6_is_empty_outside_the_exposure_window(store: Store) -> None:
     assert a.count == 0
 
 
+def test_wide_frontier_does_not_blow_sqlite_expression_depth(store: Store) -> None:
+    """A frontier wider than SQLite's 1000-deep expression limit must still resolve.
+
+    One OR-clause per frontier node raised `Expression tree is too large` on exactly the
+    biggest blast radii — lodash has 728 direct dependents. Caught by the web-db parity
+    check, not by the eval, whose held-out advisories all have small closures.
+    """
+    c = store.conn
+    c.execute(
+        "INSERT INTO version(pkg, version, published_at, is_latest) "
+        "VALUES('wide','1.0.0','2020-01-01T00:00:00Z',1)"
+    )
+    # 1,200 direct dependents — comfortably past the limit the old query hit.
+    rows = [
+        (f"dep{i}", "1.0.0", "wide", "^1.0.0", "1.0.0", "prod") for i in range(1200)
+    ]
+    c.executemany(
+        "INSERT INTO version(pkg, version, published_at, is_latest) VALUES(?,?,?,1)",
+        [(f"dep{i}", "1.0.0", "2021-01-01T00:00:00Z") for i in range(1200)],
+    )
+    c.executemany(
+        "INSERT INTO depends_on(src_pkg, src_version, dst_pkg, range, resolved, dep_type) "
+        "VALUES(?,?,?,?,?,?)",
+        rows,
+    )
+    # A second level so the wide set becomes the *frontier*, not just the first result.
+    c.execute(
+        "INSERT INTO version(pkg, version, published_at, is_latest) "
+        "VALUES('top','9.0.0','2022-01-01T00:00:00Z',1)"
+    )
+    c.executemany(
+        "INSERT INTO depends_on(src_pkg, src_version, dst_pkg, range, resolved, dep_type) "
+        "VALUES('top','9.0.0',?,'^1.0.0','1.0.0','prod')",
+        [(f"dep{i}",) for i in range(1200)],
+    )
+    store.commit()
+
+    answer = Q.blast_radius(store, "wide", "1.0.0")
+    assert answer.count == 1201  # 1200 direct + 'top' at depth 2
+    assert {r["depth"] for r in answer.rows} == {1, 2}
+
+
 def test_every_answer_carries_a_latency(store: Store) -> None:
     for ans in (
         Q.blast_radius(store, "left-pad", "1.3.0"),
