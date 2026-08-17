@@ -50,3 +50,8 @@ recording/out/
 recording/frames/
 recording/package-lock.json
 recording/package.json
+recording/models/
+recording/*.wav
+recording/*.json
+recording/*.txt
+blastradius-demo-silent.mp4

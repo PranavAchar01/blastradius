@@ -20,18 +20,22 @@ const OUT = path.resolve("out");
 const W = 1600;
 const H = 1000;
 
-// Beat durations in ms, summing to 172s (2:52) to match the measured script.
+/**
+ * Beat durations in ms, measured from the *actual* voice-over rather than the script estimate.
+ *
+ * The recorded read runs 183 wpm against the scripted 150, so the first cut of this video was
+ * 33s too long. These numbers come from transcribing the take with whisper.cpp, locating the
+ * opening phrase of each section, and remapping those timestamps through the audio edit list.
+ * Total is 132.14s, matching voice-edited.wav exactly.
+ */
 const T = {
-  problem: 33_000, // 0:00-0:33  narration over a still console
-  project: 14_000, // 0:33-0:47  "This is blastradius..."
-  verdict: 20_000, // 0:47-1:07  the numbers
-  graph: 23_000, // 1:07-1:30  hover to light the path
-  slider: 28_000, // 1:30-1:58  drag through time
-  // The first cut gave this 14s and the trace was still in flight at 132s, leaving barely
-  // three seconds on the payoff. The verdict flipping to red is the climax of the demo, so
-  // the beat is longer and front-loads the interaction to hold the result on screen.
-  lockfile: 19_000, // 1:58-2:17  drop the lockfile
-  hydra: 35_000, // 2:17-2:52  semantic search
+  problem: 27_010, // "Almost every app you use..."
+  project: 8_950, // "This is blastradius..."
+  verdict: 15_040, // "Here it is on a real case..."
+  graph: 15_510, // "This picture is the proof..."
+  slider: 18_250, // "Now I am dragging through time..."
+  lockfile: 12_310, // "Finally I will drop in..."
+  hydra: 35_070, // "HydraDB powers the half..."
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
@@ -83,7 +87,100 @@ async function glideTo(page, selector, ms = 1400) {
     },
     [selector, ms],
   );
-  await sleep(ms + 250);
+  // Wait for the scroll to actually stop rather than assuming it finished in `ms`.
+  // requestAnimationFrame is throttled in headless Chromium, so a fixed sleep can return
+  // mid-scroll — which left the fixed-position ring overlay stranded at a stale coordinate.
+  await page.waitForFunction(
+    () => {
+      const y = window.scrollY;
+      if (window.__lastY === y) return true;
+      window.__lastY = y;
+      return false;
+    },
+    null,
+    { polling: 100, timeout: 8000 },
+  );
+  await sleep(180);
+}
+
+/**
+ * The animation layer.
+ *
+ * Built as DOM overlays injected into the live page rather than composited in ffmpeg, so the
+ * type, rules and colour are literally the same Computer Modern and the same single red as the
+ * product. A post-production overlay would drift from the design system the moment either
+ * changed.
+ *
+ * Red stays reserved for confirmed exposure here too. Titles and labels are black on white,
+ * and the only red in the chrome is the wordmark and the underline rule, which is exactly how
+ * the console itself uses it.
+ */
+async function installOverlays(page) {
+  await page.addStyleTag({
+    content: `
+      #ovl{position:fixed;inset:0;z-index:2147483646;pointer-events:none;
+        font-family:"CMU Serif",Georgia,serif;color:#000}
+      #ovl .card{position:absolute;inset:0;background:#fff;display:flex;
+        flex-direction:column;align-items:center;justify-content:center;opacity:0;
+        transition:opacity .55s ease}
+      #ovl .card.on{opacity:1}
+      #ovl .wm{font-size:96px;font-weight:700;letter-spacing:-.02em;margin:0;
+        opacity:0;transform:translateY(14px);transition:all .7s cubic-bezier(.2,.7,.2,1)}
+      #ovl .wm.on{opacity:1;transform:none}
+      #ovl .wm em{font-style:normal;color:#c8102e}
+      #ovl .rule{width:0;height:3px;background:#c8102e;margin:26px 0 30px;
+        transition:width .8s cubic-bezier(.2,.7,.2,1)}
+      #ovl .rule.on{width:340px}
+      #ovl .sub{font-size:30px;font-style:italic;color:#3a3a3a;max-width:1020px;
+        text-align:center;line-height:1.45;opacity:0;transform:translateY(10px);
+        transition:all .7s cubic-bezier(.2,.7,.2,1)}
+      #ovl .sub.on{opacity:1;transform:none}
+      #ovl .lower{position:absolute;left:54px;bottom:54px;background:#000;color:#fff;
+        padding:11px 20px;font-family:"CMU Typewriter",monospace;font-size:19px;
+        letter-spacing:.1em;text-transform:uppercase;opacity:0;transform:translateY(12px);
+        transition:all .45s cubic-bezier(.2,.7,.2,1)}
+      #ovl .lower.on{opacity:1;transform:none}
+      #ovl .lower b{color:#c8102e;font-weight:700;margin-right:12px}
+    `,
+  });
+  await page.evaluate(() => {
+    const o = document.createElement("div");
+    o.id = "ovl";
+    o.innerHTML = `
+      <div class="card" id="ovl-card">
+        <h1 class="wm" id="ovl-wm"></h1>
+        <div class="rule" id="ovl-rule"></div>
+        <div class="sub" id="ovl-sub"></div>
+      </div>
+      <div class="lower" id="ovl-lower"><b id="ovl-lower-n"></b><span id="ovl-lower-t"></span></div>`;
+    document.body.appendChild(o);
+
+    const $ = (id) => document.getElementById(id);
+    window.__ovl = {
+      card(wm, sub) {
+        if (window.__cur) window.__cur(0, 0, false);
+        $("ovl-wm").innerHTML = wm;
+        $("ovl-sub").textContent = sub || "";
+        $("ovl-card").classList.add("on");
+        setTimeout(() => $("ovl-wm").classList.add("on"), 180);
+        setTimeout(() => $("ovl-rule").classList.add("on"), 620);
+        setTimeout(() => $("ovl-sub").classList.add("on"), 900);
+      },
+      cardOut() {
+        if (window.__lastCur && window.__cur) window.__cur(window.__lastCur.x, window.__lastCur.y, true);
+        for (const id of ["ovl-wm", "ovl-rule", "ovl-sub"]) $(id).classList.remove("on");
+        $("ovl-card").classList.remove("on");
+      },
+      label(n, t) {
+        $("ovl-lower-n").textContent = n;
+        $("ovl-lower-t").textContent = t;
+        $("ovl-lower").classList.add("on");
+      },
+      labelOut() {
+        $("ovl-lower").classList.remove("on");
+      },
+    };
+  });
 }
 
 /** A visible cursor. The real pointer is not captured in the video stream. */
@@ -147,6 +244,7 @@ async function main() {
     { timeout: 20_000 },
   );
   await installCursor(page);
+  await installOverlays(page);
   await page.evaluate(() => {
     window.__lastCur = { x: 800, y: 500 };
   });
@@ -154,29 +252,40 @@ async function main() {
 
   const clock = new Clock();
 
-  /* ---------------- 0:00-0:33  problem ---------------- */
+  /* ---------------- problem ----------------
+   * 27s of narration with nothing to show yet. A static console for that long is dead air,
+   * so the title card holds the frame and the problem is restated on screen while it is
+   * spoken. The card lifts just before the narration reaches "This is blastradius".
+   */
   console.log("beat: problem");
   await page.evaluate(() => window.scrollTo(0, 0));
-  await clock.until(T.problem, "problem");
+  await page.evaluate(() =>
+    window.__ovl.card(
+      "blast<em>radius</em>",
+      "A poisoned package is live for minutes. Who installed it?",
+    ),
+  );
+  await clock.until(T.problem - 1400, "problem card");
+  await page.evaluate(() => window.__ovl.cardOut());
+  await clock.until(1400, "problem out");
 
-  /* ---------------- 0:33-0:47  project ---------------- */
+  /* ---------------- project ---------------- */
   console.log("beat: project");
+  await page.evaluate(() => window.__ovl.label("§1", "the compromise"));
   await glideCursor(page, { x: 420, y: 250 }, 900);
   await clock.until(T.project, "project");
 
   /* ---------------- 0:47-1:07  verdict ---------------- */
   console.log("beat: verdict");
+  await page.evaluate(() => window.__ovl.label("§2", "verdict"));
   await glideTo(page, ".verdict", 1300);
-  // Trace across the numbers so the eye follows the narration.
-  await glideCursor(page, { x: 300, y: 430 }, 1100);
-  await sleep(3000);
-  await glideCursor(page, { x: 640, y: 430 }, 1100);
-  await sleep(3000);
-  await glideCursor(page, { x: 980, y: 430 }, 1100);
+  // The product's own hover interaction is the highlight that matters, so the verdict beat
+  // simply holds while the narration names each number.
   await clock.until(T.verdict, "verdict");
 
   /* ---------------- 1:07-1:33  the graph ---------------- */
   console.log("beat: graph");
+  await page.evaluate(() => window.__ovl.label("§3", "the path is the proof"));
   await glideTo(page, ".graph-frame", 1500);
   const nodes = await page.evaluate(() => {
     const svg = document.querySelector(".graph-frame svg");
@@ -200,6 +309,7 @@ async function main() {
 
   /* ---------------- 1:33-2:03  the scrubber ---------------- */
   console.log("beat: slider");
+  await page.evaluate(() => window.__ovl.label("§4", "when was it live"));
   await glideTo(page, ".scrubber", 1400);
   const sl = await page.evaluate(() => {
     const el = document.querySelector("input.scrub");
@@ -225,6 +335,7 @@ async function main() {
 
   /* ---------------- 2:03-2:17  the lockfile ---------------- */
   console.log("beat: lockfile");
+  await page.evaluate(() => window.__ovl.label("§5", "your exposure"));
   await glideTo(page, ".dropfile", 1200);
   const lockPath = path.resolve("../examples/acme-checkout.package-lock.json");
   await page.setInputFiles(".dropfile input[type=file]", lockPath);
@@ -243,6 +354,7 @@ async function main() {
 
   /* ---------------- 2:17-2:52  HydraDB ---------------- */
   console.log("beat: hydra");
+  await page.evaluate(() => window.__ovl.label("§6", "hydradb · semantic search"));
   const semBtn = await page.evaluate(() => {
     const b = [...document.querySelectorAll("button.press")].find((x) =>
       /search advisories/i.test(x.textContent),
@@ -270,7 +382,16 @@ async function main() {
   });
   await sleep(Math.max(0, T.hydra - 14_000));
   await page.evaluate(() => window.scrollBy({ top: 240, behavior: "smooth" }));
-  await clock.until(T.hydra, "hydra");
+  // End card over the closing two sentences, so the last thing on screen is the claim itself.
+  await clock.until(T.hydra - 6200, "hydra body");
+  await page.evaluate(() => {
+    window.__ovl.labelOut();
+    window.__ovl.card(
+      "blast<em>radius</em>",
+      "The graph tells you who is affected. HydraDB tells you what happened.",
+    );
+  });
+  await clock.until(6200, "end card");
 
   console.log(`total footage: ${(clock.elapsed() / 1000).toFixed(1)}s (target 172.0s)`);
   console.log("closing");
