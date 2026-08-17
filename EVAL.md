@@ -191,6 +191,29 @@ with the package names they correctly retrieve, so no `LIKE`, no index, and no t
 the same corpus returns them. It is also why `mode="fast"` is the console default: `thinking`
 measured 3.2s server-side in P0, which alone would blow the sub-second budget.
 
+### 3c. The shipped artifact reproduces these numbers
+
+The console ships a pruned 74.6MB database (see [README](README.md#coverage-and-limits)). Running
+the identical eval against it rather than the 152.5MB working copy:
+
+```
+uv run blastradius --db web/data/blastradius-web.db eval
+
+1404 closure cases scored
+closure micro precision=1.0000 recall=1.0000 f1=1.0000 (tp=1241 fp=0 fn=0)
+Q1 p50 0.006ms  Q3 p50 0.002ms  Q5 p50 6.528ms  Q6 p50 0.014ms
+```
+
+Identical precision, recall, and case count. The prune removes nothing that changes an answer,
+and this is the measurement of that claim rather than a promise.
+
+**One metric does not survive the prune, and it is reported rather than quietly omitted:** the
+typosquat recall in §3 requires the individual `MAL-*` advisory records, which the artifact
+collapses into a `malicious_package` name set. Run against the artifact, Q5 reports
+`held_out_malicious_packages: 0`. The console does not need those records — it only asks "is
+this name flagged?" — but the *eval* does, so the typosquat number must be reproduced against
+the full database.
+
 ## 4. Vector/embedding baseline
 
 Reproduce with: `uv run blastradius baseline`.
