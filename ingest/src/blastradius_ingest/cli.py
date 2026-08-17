@@ -19,6 +19,7 @@ import sys
 import time
 from pathlib import Path
 
+from blastradius_ingest.baseline import render_baseline, run_baseline
 from blastradius_ingest.build import (
     backfill_affected_intervals,
     build_graph,
@@ -260,6 +261,30 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_baseline(args: argparse.Namespace) -> int:
+    """Ask HydraDB the same six questions and score it against verified graph truth."""
+    paths = _paths(args)
+    client = HydraClient()
+    with Store(args.db) as store:
+        cases = run_baseline(store, client, args.pkg, args.version, args.osv_id)
+        out = paths.root / "baseline_results.json"
+        render_baseline(cases, out)
+    print(
+        f"\n{'question':<24} {'truth':>6} {'found':>6} {'hit':>4} {'prec':>6} {'recall':>7}"
+        f" {'graph':>9} {'vector':>9}"
+    )
+    print("-" * 80)
+    for c in cases:
+        mark = "" if c.expressible else "  (not expressible)"
+        print(
+            f"{c.question:<24} {len(c.truth):>6} {len(c.retrieved):>6} "
+            f"{len(c.truth & c.retrieved):>4} {c.precision:>6.2f} {c.recall:>7.2f} "
+            f"{c.graph_latency_ms:>7.3f}ms {c.vector_latency_ms:>7.0f}ms{mark}"
+        )
+    print(f"\nwrote {out}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     paths = _paths(args)
     n_names = sum(1 for _ in iter_names(paths.names))
@@ -332,6 +357,14 @@ def build_parser() -> argparse.ArgumentParser:
     hq.add_argument("--mode", choices=("fast", "thinking"), default="fast")
     hq.add_argument("--max-results", type=int, default=10)
     hq.set_defaults(func=cmd_hydra_query)
+
+    bl = sub.add_parser(
+        "baseline", help="vector/embedding baseline for the same six questions"
+    )
+    bl.add_argument("--pkg", default="lodash")
+    bl.add_argument("--version", default="3.10.1")
+    bl.add_argument("--osv-id", dest="osv_id", default="GHSA-35jh-r3h4-6jhm")
+    bl.set_defaults(func=cmd_baseline)
 
     ev = sub.add_parser("eval", help="score the held-out advisories")
     ev.add_argument("--limit", type=int, default=None, help="cap closure cases scored")

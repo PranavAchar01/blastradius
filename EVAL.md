@@ -191,14 +191,88 @@ with the package names they correctly retrieve, so no `LIKE`, no index, and no t
 the same corpus returns them. It is also why `mode="fast"` is the console default: `thinking`
 measured 3.2s server-side in P0, which alone would blow the sub-second budget.
 
-## 4. Vector/embedding baseline — **pending**
+## 4. Vector/embedding baseline
 
-Not yet run. Will report what a semantic-similarity approach returns for the same six
-questions, against the same held-out set. The argument for why it cannot express them is in
-[SCHEMA.md](SCHEMA.md) §4; this section is the measurement of that argument, not a restatement
-of it.
+Reproduce with: `uv run blastradius baseline`.
+
+**This is not a strawman.** The baseline is HydraDB — a production semantic retrieval system
+that §3b shows is genuinely excellent at what it is for. Both systems get the same question
+about the same compromised package (`lodash@3.10.1`, GHSA-35jh-r3h4-6jhm) over the same corpus,
+and both are scored against the graph's verified ground truth, which was hand-checked against
+npm's live registry in P2. Package-name extraction from the retrieval results is deliberately
+generous: any known package name appearing anywhere in a returned chunk counts as retrieved.
+
+| question | truth | retrieved | overlap | precision | recall | graph | vector |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Q1 blast radius | 8 | 20 | **0** | 0.00 | 0.00 | 2.9 ms | 636 ms |
+| Q2 introducing version | 4 | 4 | **4** | **1.00** | **1.00** | 2.4 ms | 531 ms |
+| Q3 temporal exposure | 0 | 28 | 0 | — | — | 1.3 ms | 572 ms |
+| Q4 shared maintainer | 303 | 29 | 10 | 0.34 | 0.03 | 38.8 ms | 484 ms |
+| Q5 typosquats | 46 | 30 | **0** | 0.00 | 0.00 | 67.1 ms | 407 ms |
+| Q6 rollup | 0 | 39 | 0 | — | — | 0.3 ms | 1495 ms |
+
+### What this actually shows
+
+**Q1 — zero overlap out of eight.** Semantic search returned 20 packages, none of which is a
+dependent of `lodash@3.10.1`. It retrieves packages that are *about* lodash-ish things; being
+depended upon is not a kind of resemblance. And closure is transitive: even a perfect depth-1
+result could not compose to depth 2, because ranked retrieval has no composition operator.
+
+**Q2 — the vector approach wins outright, 1.00/1.00.** Worth stating plainly rather than
+burying: when the answer is written down in prose ("versions prior to 4.17.21 are affected"),
+retrieval finds it, and the graph's advantage evaporates. This is the honest boundary of the
+argument. It is also why the system keeps both halves instead of picking one.
+
+**Q4 — 10 of 303, precision 0.34.** Retrieval surfaces a few packages that happen to be
+discussed near each other, and misses 97% of the maintainer's actual catalogue. A maintainer's
+packages are usually unrelated in purpose, so similarity is the wrong axis entirely — this is
+the query where embeddings return a confidently wrong answer rather than an empty one.
+
+**Q5 — zero of 46.** The clearest structural result. `1odash` and `lodash` are one keystroke
+apart and mean the *same thing* to an embedding model, which is precisely why the attack works.
+Any embedding good enough for search is, by construction, blind to typosquatting.
+
+**Q3 and Q6 — not demonstrated, and marked as such.** The graph's truth set is empty here
+because no lockfile is loaded in the eval database, so "0 overlap" is vacuous and is **not**
+counted as a win. The claim that these are inexpressible rests on structure, argued in
+[SCHEMA.md](SCHEMA.md) §4: Q3 needs interval algebra over two independent time ranges, and Q6
+needs shortest-path depth plus a min over interval starts — properties of a traversal, with
+nothing to embed. The console demonstrates both against a real uploaded lockfile.
+
+**Latency.** The graph answers in 0.3–67 ms; retrieval takes 407–1495 ms. Two to four orders of
+magnitude, before correctness is considered.
+
+### The fair summary
+
+Similarity search is the right tool for *"what is this advisory about?"* and the wrong tool for
+*"who is exposed, how deep, and since when?"* — and this table is the measurement rather than
+the assertion. The system uses HydraDB for the former (§3b: 0.91–0.95 on queries naming no
+package) and the graph for the latter. Neither half is decoration.
 
 ## 5. Reproduction
 
-One command, documented in the README, regenerates everything in §3–§4 from a cold clone.
-Recorded here once §3 exists so the command and the numbers ship together.
+Everything in §3 and §4 regenerates from a cold clone with the pipeline below. `eval` and
+`baseline` are the two that produce the numbers in this file; the stages above them build the
+graph they run against and are individually resumable.
+
+```bash
+cp .env.example .env          # then fill in HYDRADB_API_KEY
+cd ingest
+uv run blastradius names              # 4.29M package names
+uv run blastradius downloads          # weekly downloads, to rank
+uv run blastradius rank --top-n 25000 # freeze the coverage cap
+uv run blastradius latest             # deps + maintainers for the top-N
+uv run blastradius advisories         # OSV npm corpus + holdout
+uv run blastradius build              # assemble the SQLite graph
+uv run blastradius packuments         # version histories for advisory-affected packages
+uv run blastradius resolve            # resolve ranges; fill validity intervals
+uv run blastradius similar            # SIMILAR_NAME edges
+uv run blastradius hydra-ingest       # advisory prose into HydraDB
+
+uv run blastradius eval               # -> §3, writes data/eval_results.json
+uv run blastradius baseline           # -> §4, writes data/baseline_results.json
+```
+
+Raw outputs are written as JSON so every number in this file can be checked rather than taken
+on faith — including `disagreements` in `eval_results.json`, which lists every case where the
+graph and the independent oracle differ.

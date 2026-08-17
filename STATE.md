@@ -149,23 +149,58 @@ these 6 resolve to 3.10.1. The other 820 resolve to 4.x and are correctly exclud
 the distinction a similarity index collapses and the reason B7 mattered.
 
 ## P3 — Query engine
-- [ ] Q1 transitive reverse-dep closure (blast radius) for pkg@version
-- [ ] Q2 which version introduced the vulnerability
-- [ ] Q3 which lockfiles/services resolved the bad version while it was live (temporal)
-- [ ] Q4 packages sharing a maintainer with the compromised one
-- [ ] Q5 likely typosquats near the compromised name
-- [ ] Q6 blast radius rollup: services exposed, depth, first-exposure time
-- [ ] Upload package-lock.json → real Service/Lockfile nodes
-- [ ] p50/p95 latency measured per query
+- [x] Q1 transitive reverse-dep closure (blast radius) for pkg@version
+- [x] Q2 which version introduced the vulnerability
+- [x] Q3 which lockfiles/services resolved the bad version while it was live (temporal)
+- [x] Q4 packages sharing a maintainer with the compromised one
+- [x] Q5 likely typosquats near the compromised name
+- [x] Q6 blast radius rollup: services exposed, depth, first-exposure time
+- [x] Upload package-lock.json → real Service/Lockfile nodes
+- [x] p50/p95 latency measured per query
 
-**GATE:** all six correct on the P2 hand-checked advisory; latencies recorded.
+**P3 GATE: PASSED.** All six answer correctly on the P2 hand-checked advisory
+(`lodash@3.10.1`, GHSA-35jh-r3h4-6jhm), with p50/p95 measured over 1,404 held-out advisories
+on the full 25k graph:
+
+| question | p50 | p95 | correctness evidence |
+| --- | ---: | ---: | --- |
+| Q1 blast radius | 0.006 ms | 0.214 ms | 6/6 verified vs npm live; recall 1.0000 vs independent oracle |
+| Q2 introducing version | 0.007 ms | 0.168 ms | returns `[0 → 4.17.21]`, matching the advisory |
+| Q3 exposed during (temporal) | 0.003 ms | 0.004 ms | 1 service in the 09:00–09:06 window, 0 after revert |
+| Q4 shared maintainer | 0.035 ms | 0.463 ms | exact join; 303 siblings for lodash |
+| Q5 typosquats | 9.842 ms | 11.508 ms | 46 candidates; `chalk2`/`chalkk` independently MAL-flagged |
+| Q6 rollup | 0.013 ms | 0.033 ms | first-exposure 09:01:00Z, depth from traversal |
+
+`package-lock.json` upload is implemented for both lockfileVersion 1 (dependency tree) and
+2/3 (packages map), instantiating real Service/Lockfile nodes and RESOLVED_TO interval edges —
+tested in `tests/test_queries.py`.
 
 ## P4 — Eval harness
-- [ ] Score held-out advisories: precision, recall, p50/p95, cost/query → EVAL.md table
-- [ ] Honest baseline: what a vector/embedding approach returns for the same six questions
-- [ ] Document every limitation and coverage cap (also in README)
+- [x] Score held-out advisories: precision, recall, p50/p95, cost/query → EVAL.md table
+- [x] Honest baseline: what a vector/embedding approach returns for the same six questions
+- [x] Document every limitation and coverage cap (also in README)
 
 **GATE:** EVAL.md has real numbers, reproducible via one documented command.
+
+**P4 GATE: PASSED.** [EVAL.md](EVAL.md) has real numbers from real runs, reproducible via
+`uv run blastradius eval` and `uv run blastradius baseline` (full pipeline in EVAL.md §5).
+
+```
+[eval] 1404 closure cases scored in 133s
+[eval] counters: {'oracle_entries': 12034, 'held_out_ghsa_in_cap': 2224,
+                  'skipped_no_known_affected_version': 820}
+[eval] closure micro precision=1.0000 recall=1.0000 f1=1.0000 (tp=1241 fp=0 fn=0)
+[eval] Q1_blast_radius   n=1404 p50=0.006ms p95=0.214ms
+[eval] Q3_exposed_during n=4212 p50=0.003ms p95=0.004ms
+[eval] Q5_typosquats     n=4212 p50=9.842ms p95=11.508ms
+[eval] typosquats: recall 2.04% (207/10,163)
+
+baseline (HydraDB, same questions, same corpus):
+  Q1 blast radius       truth 8   retrieved 20  overlap 0    graph 2.9ms  vector 636ms
+  Q2 introducing version truth 4  retrieved 4   overlap 4    graph 2.4ms  vector 531ms
+  Q4 shared maintainer  truth 303 retrieved 29  overlap 10   graph 38.8ms vector 484ms
+  Q5 typosquats         truth 46  retrieved 30  overlap 0    graph 67.1ms vector 407ms
+```
 
 ## P5 — Console
 - [ ] Next.js: paste pkg@version or upload lockfile → interactive graph with traversal path visible
