@@ -22,7 +22,9 @@ out/
 *.tsbuildinfo
 
 # ingest working data (large, regenerable)
-data/
+# Root-scoped: the ingest working set only. `web/data/` holds the shipped console artifact
+# and must stay tracked, and git cannot re-include a file under an ignored directory.
+/data/
 checkpoints/
 *.ndjson
 *.ndjson.gz
@@ -30,3 +32,11 @@ checkpoints/
 # os / editor
 .DS_Store
 *.swp
+
+# The console artifact (75MB) is committed deliberately: a cold clone can run the console and
+# reproduce the query results without first sitting through the multi-hour ingest.
+# Regenerate with `uv run blastradius webdb`.
+
+# SQLite sidecars are runtime state, never artifacts
+*.db-wal
+*.db-shm
