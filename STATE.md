@@ -86,9 +86,67 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
 - [x] Hold out advisories after cutoff date → eval set, recorded in [EVAL.md](EVAL.md)
       (cutoff `2026-01-01`; 12,933 held out — 10,164 MAL-* + 2,769 GHSA; enforced once at
       load time so it cannot leak at a call site)
-- [ ] Log throughput, node/edge counts, cost here
+- [x] Log throughput, node/edge counts, cost here
 
-**GATE:** graph loaded; counts reported; a real advisory's reverse-dep closure hand-checked vs npm.
+**GATE: PASSED.** Full graph loaded at the frozen 25,000-package cap; counts below; a real
+advisory's reverse-dep closure hand-checked against npm's live registry.
+
+### Node / edge counts
+
+```
+package          25,754        advisory        226,832
+version         212,360*       affected_by     230,017   (1,818 with real validity intervals)
+maintainer       18,614        similar_name     (rebuilding at 25k cap)
+published_by     58,202        service               1
+depends_on       81,181        lockfile              1
+  of which resolved 48,685     resolved_to           2
+```
+\* 36,675 latest-version rows plus full histories for the 915 advisory-affected packages.
+
+### Throughput and cost
+
+| stage | volume | time | rate |
+| --- | ---: | ---: | --- |
+| names (`_all_docs`) | 4,291,086 | ~35 min | ~2,000/s |
+| downloads (bulk, unscoped) | 2,667,953 | ~6.5 h | 85–218/s, rate-limit bound |
+| latest (deps + maintainers) | 25,000 | ~17 min | ~1,507/min at concurrency 4 |
+| packuments (advisory-affected) | 915 | 257 s | ~3.6/s |
+| OSV advisories | 226,832 | 6 s | ~38,000/s |
+| SIMILAR_NAME (4.29M × 2,000) | 12,264 edges | 164 s | ~21M pairs/s |
+| HydraDB advisory ingest | 4,250 | 53 min | rate-limit bound (429) |
+
+**Cost: $0 in API spend.** Every source is free and public — npm registry, npm downloads API,
+OSV/GCS, and the hackathon HydraDB instance. The only real cost is wall-clock against rate
+limits, which is why the concurrency findings above mattered more than any optimisation.
+
+### Hand-check — `lodash@3.10.1`, GHSA-35jh-r3h4-6jhm (Command Injection, HIGH)
+
+Chosen because 728 of lodash's dependents resolve to 4.18.1 and are correctly **not** flagged
+(every lodash GHSA is fixed by 4.17.21), while a real tail still sits on 3.x. So the case tests
+the fix boundary rather than just "does anything come back".
+
+```
+blast_radius(lodash@3.10.1) -> 8 package-versions, depths [1,2], 2.6ms
+direct dependents (6):
+  cli-table2@0.2.0        declares ^3.10.1
+  grunt-usemin@3.1.1      declares ^3.6.0
+  health@0.3.0            declares ^3.9.3
+  html-to-json@0.6.0      declares ^3.10.1
+  jscs@3.0.7              declares ~3.10.0
+  machinepack-urls@6.0.1  declares ^3.9.2
+```
+
+**Precision — verified against npm's live registry.** Each dependent's manifest was re-fetched
+from `registry.npmjs.org` and its declared range checked against 3.10.1:
+`verified 6/6, contradicted 0, fetch errors 0 → 100%`.
+
+**Recall — independent recomputation.** Re-derived the expected set straight from the raw
+manifests with separate semver logic that does not touch the graph-build code:
+`independently expected 6, graph reports 6, exact set match: True`.
+
+**Discrimination at scale:** 826 packages inside the cap declare a dependency on lodash; only
+these 6 resolve to 3.10.1. The other 820 resolve to 4.x and are correctly excluded — which is
+the distinction a similarity index collapses and the reason B7 mattered.
 
 ## P3 — Query engine
 - [ ] Q1 transitive reverse-dep closure (blast radius) for pkg@version
@@ -268,6 +326,17 @@ wrong. Querying `1.2.0` instead returns it at depth 1, as expected.
   every worker ends up sleeping rather than fetching. Default lowered to 4 with a comment
   not to raise it without re-measuring. Same root cause as the earlier scoped-downloads
   measurement (B4), where throughput also fell as concurrency rose.
+- **Aug 15, iter 9** — P2 gate passed. Graph built at the full 25,000 cap: 25,754 packages,
+  212,360 versions, 81,181 DEPENDS_ON (48,685 resolved), 230,017 AFFECTED_BY. The packument
+  pass now covers 915 advisory-affected packages (was 62), lifting real validity intervals
+  from 56 to 1,818 and adding 5,996 newly-resolved edges.
+- **Aug 15, iter 9** — Picked `lodash@3.10.1` for the hand-check specifically because it tests
+  the *fix boundary*: 728 lodash dependents resolve to 4.18.1 and must NOT be flagged (every
+  lodash GHSA is fixed by 4.17.21), while a genuine tail still sits on 3.x. Precision came back
+  6/6 against npm's live registry, and an independent recomputation from raw manifests — using
+  separate semver logic that never touches the build code — produced an exact set match.
+  826 packages in the cap declare lodash; only 6 resolve to 3.10.1. That gap between 826 and 6
+  is the whole argument for the graph.
 
 ## Blockers
 
